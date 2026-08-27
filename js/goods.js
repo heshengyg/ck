@@ -1106,8 +1106,12 @@ function renderGoods() {
         // 🔥 获取最小计量单位名称
         let baseUnitName = item.base_unit_name || '-';
         
-        // 🔥 判断是否有换算规格
+        // 🔥 判断是否有换算规格（即是否选了单位）
         let hasSpec = item.base_unit_id ? true : false;
+        
+        // ========== 🔥 核心修改：已选单位 → 显示 "-"，未选单位 → 显示价格 ==========
+        let displaySalePrice = hasSpec ? '-' : (formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0));
+        let displayOnlineCost = hasSpec ? '-' : onlineCost;
         
         let delBtn = '';
         if (isUsed) {
@@ -1130,9 +1134,8 @@ function renderGoods() {
                 <td>${item.spec || '-'}</td>
                 <td>${item.channel || ''}</td>
                 <td>${baseUnitName}</td>
-                <!-- 🔥 删除了价格基准规格列（原第8列） -->
-                <td>${formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0)}</td>
-                <td>${onlineCost}</td>
+                <td>${displaySalePrice}</td>
+                <td>${displayOnlineCost}</td>
                 <td>${item.tax_rate ? item.tax_rate + '%' : ''}</td>
                 <td>${shelfText}</td>
                 <td>${expire}</td>
