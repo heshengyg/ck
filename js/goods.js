@@ -1113,17 +1113,23 @@ function renderGoods() {
         let displaySalePrice = hasSpec ? '-' : (formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0));
         let displayOnlineCost = hasSpec ? '-' : onlineCost;
         
+        // ========== 🔥 删除按钮 ==========
         let delBtn = '';
         if (isUsed) {
-            delBtn = `<button class="btn btn-danger" disabled style="opacity:0.5">删除</button>`;
+            delBtn = `<button class="btn btn-sm btn-danger" disabled style="padding:2px 12px;font-size:12px;border:none;border-radius:3px;opacity:0.5;cursor:not-allowed;white-space:nowrap;">删除</button>`;
         } else {
-            delBtn = `<button class="btn btn-danger" onclick="deleteGoods(${item.id})">删除</button>`;
+            delBtn = `<button class="btn btn-sm btn-danger" onclick="deleteGoods(${item.id})" style="padding:2px 12px;font-size:12px;border:none;border-radius:3px;cursor:pointer;background:#ff4d4f;color:#fff;white-space:nowrap;">删除</button>`;
         }
         
-        // 🔥 展开按钮
-        let expandBtn = hasSpec ? 
-            `<button class="btn btn-sm btn-default" onclick="toggleSpecDetail(${item.id}, this)" style="padding:2px 8px;font-size:12px;">展开 ▼</button>` :
-            `<button class="btn btn-sm btn-default" disabled style="padding:2px 8px;font-size:12px;opacity:0.5;">无规格</button>`;
+        // ========== 🔥 编辑按钮 ==========
+        let editBtn = `<button class="btn btn-sm btn-primary" onclick="openEditForm(${item.id})" style="padding:2px 12px;font-size:12px;border:none;border-radius:3px;cursor:pointer;background:#1890ff;color:#fff;white-space:nowrap;">编辑</button>`;
+        
+        // ========== 🔥 规格列中的展开按钮 ==========
+        let specDisplay = item.spec || '-';
+        let expandBtnHtml = '';
+        if (hasSpec) {
+            expandBtnHtml = `<button onclick="toggleSpecDetail(${item.id}, this)" style="padding:0 8px;font-size:11px;border:1px solid #1890ff;color:#1890ff;background:#fff;border-radius:3px;cursor:pointer;margin-left:6px;white-space:nowrap;line-height:20px;">展开</button>`;
+        }
         
         let html = `
             <tr class="goods-main-row" data-goods-id="${item.id}">
@@ -1131,7 +1137,7 @@ function renderGoods() {
                 <td>${seqNum}</td>
                 <td>${item.supplier || ''}</td>
                 <td>${item.name || ''}</td>
-                <td>${item.spec || '-'}</td>
+                <td>${specDisplay} ${expandBtnHtml}</td>
                 <td>${item.channel || ''}</td>
                 <td>${baseUnitName}</td>
                 <td>${displaySalePrice}</td>
@@ -1141,8 +1147,7 @@ function renderGoods() {
                 <td>${expire}</td>
                 <td>${item.warn_num || 0}</td>
                 <td>
-                    ${expandBtn}
-                    <button class="btn btn-primary" onclick="openEditForm(${item.id})">编辑</button>
+                    ${editBtn}
                     ${delBtn}
                 </td>
             </tr>
