@@ -1403,6 +1403,11 @@ async function renderStockIn() {
         });
     }
     
+    // 🔥 确保 baseUnitList 已加载
+    if (!baseUnitList || baseUnitList.length === 0) {
+        await loadAllBaseUnit();
+    }
+    
     // 🔥 收集所有需要查询的 unit_spec_id
     const specIds = pageData.map(item => item.unit_spec_id).filter(id => id);
     let specMap = {};
@@ -1445,17 +1450,22 @@ async function renderStockIn() {
             
             // ========== 🔥 优化规格显示逻辑（分两行） ==========
             let specDisplay = '-';
-if (item.unit_spec_id && specMap[item.unit_spec_id]) {
-    const spec = specMap[item.unit_spec_id];
-    // 获取基础单位名称
-    const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
-    const baseName = baseItem ? baseItem.unit_name : '';
-    // 🔥 分两行显示：第一行规格名称，第二行（换算比例+基础单位）
-    specDisplay = `<div style="display:flex;flex-direction:column;align-items:center;line-height:1.4;">
-        <span style="font-weight:bold;font-size:14px;">${spec.show_name}</span>
-        <span style="font-size:12px;color:#999;">（${spec.convert_rate}${baseName}）</span>
-    </div>`;
-}
+            if (item.unit_spec_id && specMap[item.unit_spec_id]) {
+                const spec = specMap[item.unit_spec_id];
+                // 🔥 获取基础单位名称
+                let baseName = '';
+                if (baseUnitList && baseUnitList.length > 0) {
+                    const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
+                    if (baseItem) {
+                        baseName = baseItem.unit_name;
+                    }
+                }
+                // 🔥 分两行显示：第一行规格名称，第二行（换算比例+基础单位）
+                specDisplay = `<div style="display:flex;flex-direction:column;align-items:center;line-height:1.4;">
+                    <span style="font-weight:bold;font-size:14px;">${spec.show_name}</span>
+                    <span style="font-size:12px;color:#999;">（${spec.convert_rate}${baseName}）</span>
+                </div>`;
+            }
             
             let btnHtml = '';
             
