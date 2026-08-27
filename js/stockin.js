@@ -271,15 +271,34 @@ function selectInGoods(goods, selectedSpecId, isEditMode){
     salePriceInput.style.color = '';
     
     // 🔥 加载入库规格下拉，传入选中的规格ID
-    if (!baseUnitList || baseUnitList.length === 0 || !unitSpecList || unitSpecList.length === 0) {
-        loadAllBaseUnit().then(() => {
-            loadAllUnitSpec().then(() => {
-                loadInUnitSpecs(goods.id, selectedSpecId, goods);
+    const loadSpecs = function() {
+        if (!baseUnitList || baseUnitList.length === 0 || !unitSpecList || unitSpecList.length === 0) {
+            loadAllBaseUnit().then(() => {
+                loadAllUnitSpec().then(() => {
+                    loadInUnitSpecs(goods.id, selectedSpecId, goods);
+                    // 规格加载完成后，再加载最近入库单价
+                    setTimeout(() => {
+                        if (goods.channel === '线下') {
+                            const unitSpecSelect = document.getElementById('inUnitSpec');
+                            const specId = unitSpecSelect ? unitSpecSelect.value : null;
+                            loadLastInPriceAndRemind(goods, specId);
+                        }
+                    }, 300);
+                });
             });
-        });
-    } else {
-        loadInUnitSpecs(goods.id, selectedSpecId, goods);
-    }
+        } else {
+            loadInUnitSpecs(goods.id, selectedSpecId, goods);
+            // 规格加载完成后，再加载最近入库单价
+            setTimeout(() => {
+                if (goods.channel === '线下') {
+                    const unitSpecSelect = document.getElementById('inUnitSpec');
+                    const specId = unitSpecSelect ? unitSpecSelect.value : null;
+                    loadLastInPriceAndRemind(goods, specId);
+                }
+            }, 300);
+        }
+    };
+    loadSpecs();
     
     let priceInput = document.getElementById('inPrice');
     if(goods.channel === '线上'){
@@ -288,12 +307,7 @@ function selectInGoods(goods, selectedSpecId, isEditMode){
         hideInPriceReminder();
     }else{
         priceInput.disabled = false;
-        if (!isEditMode) {
-            // 🔥 传入当前选中的规格ID
-            const unitSpecSelect = document.getElementById('inUnitSpec');
-            const specId = unitSpecSelect ? unitSpecSelect.value : null;
-            loadLastInPriceAndRemind(goods, specId);
-        }
+        // 不在这里调用 loadLastInPriceAndRemind，等待规格加载完成后调用
     }
     updateInPriceByDate();
 }
@@ -400,14 +414,21 @@ function loadInUnitSpecs(goodsId, selectedSpecId, goods) {
             }
             return;
         } else if (specCount === 1) {
-            // 🔥 只有1个规格：自动选中，加载价格
-            const firstOption = select.querySelector('option:not([value=""])');
-            if (firstOption) {
-                select.value = firstOption.value;
-                // 触发规格变更，更新销售单价
-                onInUnitSpecChange();
-            }
-        } else {
+    // 🔥 只有1个规格：自动选中，加载价格
+    const firstOption = select.querySelector('option:not([value=""])');
+    if (firstOption) {
+        select.value = firstOption.value;
+        // 触发规格变更，更新销售单价
+        onInUnitSpecChange();
+        // 🔥 新增：自动加载最近入库单价（线下商品）
+        if (goods && goods.channel === '线下') {
+            setTimeout(() => {
+                loadLastInPriceAndRemind(goods, firstOption.value);
+            }, 200);
+        }
+    }
+}
+ else {
             // 🔥 多个规格（>=2）：默认"请选择规格"，不加载价格
             select.value = '';
             // 清空销售价格
@@ -628,43 +649,6 @@ async function getLastInPrice(supplier, goodsName, unitSpecId) {
     }
 }
 
-/**
- * 获取最近入库单价（排除自身ID，用于编辑时）- 按 unit_spec_id 精确匹配
- */
-async function getLastInPriceExcludeSelf(supplier, goodsName, excludeId, unitSpecId) {
-    try {
-        if (!unitSpecId) {
-            console.warn('getLastInPriceExcludeSelf: 未传入 unitSpecId，无法匹配');
-            return null;
-        }
-        
-        const encodedSupplier = encodeURIComponent(supplier);
-        const encodedGoodsName = encodeURIComponent(goodsName);
-        
-        // 🔥 按 unit_spec_id 精确匹配
-        let url = `${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}&unit_spec_id=eq.${unitSpecId}&id=neq.${excludeId}`;
-        url += `&order=record_date.desc&limit=1`;
-        
-        const res = await fetch(url, {
-            headers: {
-                apikey: SUPABASE_KEY,
-                Authorization: `Bearer ${SUPABASE_KEY}`
-            }
-        });
-        const data = await res.json();
-        if (data && data.length > 0 && data[0].in_price) {
-            return {
-                price: data[0].in_price,
-                recordDate: data[0].record_date,
-                inNum: data[0].in_num
-            };
-        }
-        return null;
-    } catch (e) {
-        console.warn('获取最近入库单价（排除自身）失败:', e);
-        return null;
-    }
-}
 /**
  * 获取最近入库单价（排除自身ID，用于编辑时）
  */
@@ -1067,41 +1051,34 @@ if(id){
             
             // 🔥 加载入库规格下拉
             const selectedSpecId = item.unit_spec_id || null;
-            if (!baseUnitList || baseUnitList.length === 0 || !unitSpecList || unitSpecList.length === 0) {
-                loadAllBaseUnit().then(() => {
-                    loadAllUnitSpec().then(() => {
-                        loadInUnitSpecs(targetGoods.id, selectedSpecId);
-                       // 在编辑分支中，加载完规格后调用
-if (selectedSpecId) {
-    const unitSpecSelect = document.getElementById('inUnitSpec');
-    if (unitSpecSelect) {
-        setTimeout(() => {
-            unitSpecSelect.value = selectedSpecId;
-            onInUnitSpecChange();
-            // 🔥 编辑时加载最近入库单价（用于对比提醒）
-            const targetGoods = currGoodsList.find(g => g.name === item.goodsName);
-            if (targetGoods) {
-                loadLastInPriceAndRemind(targetGoods, selectedSpecId);
-            }
-        }, 50);
-    }
-}
-                    });
-                });
-            } else {
-                loadInUnitSpecs(targetGoods.id, selectedSpecId);
-                if (selectedSpecId) {
-                    const unitSpecSelect = document.getElementById('inUnitSpec');
-                    if (unitSpecSelect) {
-                        setTimeout(() => {
-                            unitSpecSelect.value = selectedSpecId;
-                            onInUnitSpecChange();
-                        }, 50);
-                    }
-                }
-            }
             
-            // 🔥 直接设置编辑数据，不依赖 selectInGoods
+            // 先加载规格
+            const loadSpecs = function() {
+                if (!baseUnitList || baseUnitList.length === 0 || !unitSpecList || unitSpecList.length === 0) {
+                    loadAllBaseUnit().then(() => {
+                        loadAllUnitSpec().then(() => {
+                            loadInUnitSpecs(targetGoods.id, selectedSpecId, targetGoods);
+                            // 规格加载完成后，再加载最近入库单价
+                            setTimeout(() => {
+                                if (targetGoods.channel === '线下') {
+                                    loadLastInPriceAndRemind(targetGoods, selectedSpecId);
+                                }
+                            }, 300);
+                        });
+                    });
+                } else {
+                    loadInUnitSpecs(targetGoods.id, selectedSpecId, targetGoods);
+                    // 规格加载完成后，再加载最近入库单价
+                    setTimeout(() => {
+                        if (targetGoods.channel === '线下') {
+                            loadLastInPriceAndRemind(targetGoods, selectedSpecId);
+                        }
+                    }, 300);
+                }
+            };
+            loadSpecs();
+            
+            // 🔥 直接设置编辑数据
             document.getElementById('inPrice').value = item.in_price || '';
             document.getElementById('inNum').value = item.in_num;
             document.getElementById('inRecordDate').value = item.record_date;
@@ -1121,22 +1098,21 @@ if (selectedSpecId) {
                 hideInPriceReminder();
             }else{
                 priceInput.disabled = false;
-               // 在 openStockInForm 编辑分支中
-if (item.in_price) {
-    // 🔥 传入单位规格ID
-    const unitSpecId = item.unit_spec_id || null;
-    getLastInPriceExcludeSelf(item.supplier, item.goodsName, item.spec || '', item.id, unitSpecId).then(lastRecord => {
-        if (lastRecord && lastRecord.price > 0) {
-            if (Math.abs(lastRecord.price - parseFloat(item.in_price)) < 0.01) {
-                showPriceConsistentReminder(lastRecord.price, lastRecord.recordDate);
-            } else {
-                showPriceChangedReminder(lastRecord.price, parseFloat(item.in_price), lastRecord.recordDate);
-            }
-        } else {
-            showNoHistoryReminder();
-        }
-    });
-}
+                // 编辑时对比价格提醒
+                if (item.in_price) {
+                    const unitSpecId = item.unit_spec_id || null;
+                    getLastInPriceExcludeSelf(item.supplier, item.goodsName, item.id, unitSpecId).then(lastRecord => {
+                        if (lastRecord && lastRecord.price > 0) {
+                            if (Math.abs(lastRecord.price - parseFloat(item.in_price)) < 0.01) {
+                                showPriceConsistentReminder(lastRecord.price, lastRecord.recordDate);
+                            } else {
+                                showPriceChangedReminder(lastRecord.price, parseFloat(item.in_price), lastRecord.recordDate);
+                            }
+                        } else {
+                            showNoHistoryReminder();
+                        }
+                    });
+                }
             }
             
             // ✅ 更新销售单价（根据日期状态）
