@@ -41,7 +41,7 @@ function canOperatePriceEdit() {
 }
 // 挂载全局
 window.canOperateDateUpdate = canOperateDateUpdate;
-window.canOperatePriceEdit = canOperateDateUpdate;
+window.canOperatePriceEdit = canOperatePriceEdit;
 window.isFinanceOrAdmin = isFinanceOrAdmin;
 
 
@@ -1087,15 +1087,8 @@ function renderGoods() {
         // 🔥 获取最小计量单位名称
         let baseUnitName = item.base_unit_name || '-';
         
-        // 🔥 获取价格基准规格名称
+        // 🔥 获取价格基准规格名称（已移除，保留空显示）
         let priceSpecName = '-';
-        if (item.price_spec_id) {
-            const spec = unitSpecList.find(s => s.id == item.price_spec_id);
-            if (spec) {
-                const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
-                priceSpecName = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
-            }
-        }
         
         let delBtn = '';
         if (isUsed) {
@@ -1113,7 +1106,7 @@ function renderGoods() {
                 <td>${item.spec || '-'}</td>
                 <td>${item.channel || ''}</td>
                 <td>${baseUnitName}</td>           <!-- 🔥 新增：最小计量单位 -->
-                <td>${priceSpecName}</td>           <!-- 🔥 新增：价格基准规格 -->
+                <td>${priceSpecName}</td>           <!-- 🔥 移除价格基准规格 -->
                 <td>${formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0)}</td>
                 <td>${onlineCost}</td>
                 <td>${item.tax_rate ? item.tax_rate + '%' : ''}</td>
@@ -1403,15 +1396,8 @@ function exportExcel() {
         let shelf = item.shelf_life_num ? `${item.shelf_life_num}${item.shelf_life_unit || ''}` : "";
         let expire = calculateExpireDays ? calculateExpireDays(item.shelf_life_num, item.shelf_life_unit) : '';
         let baseUnitName = item.base_unit_name || '';
-        // 获取价格基准规格名称
+        // 获取价格基准规格名称（已移除）
         let priceSpecName = '';
-        if (item.price_spec_id) {
-            const spec = unitSpecList.find(s => s.id == item.price_spec_id);
-            if (spec) {
-                const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
-                priceSpecName = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
-            }
-        }
         return [
             item.supplier || "",
             item.name || "",
@@ -1499,7 +1485,6 @@ function importGoodsExcel() {
                     warn_num: warnNum || null,
                     shelf_life_num: shelfLifeNum || null,
                     shelf_life_unit: shelfLifeUnit || null,
-                    // 导入时 base_unit_name 作为参考，但实际绑定需要用户后续在编辑中设置
                     base_unit_name: baseUnitName || null
                 };
 
@@ -4755,7 +4740,7 @@ function selectGoodsBaseUnit(item) {
     renderGoodsUnitTree(item.id);
 }
 
-// 渲染已选规格展示（按二级单位分组，每个二级占一行）
+// ===================== 渲染已选规格展示（每个规格独立一行，带销售单价和线上成本价输入框） =====================
 function renderGoodsUnitTree(selectedBaseId) {
     const wrap = $('specMultiWrap');
     const checkBox = $('specCheckWrap');
@@ -4767,6 +4752,7 @@ function renderGoodsUnitTree(selectedBaseId) {
         boundSpecIds = bindInput.value.split(',').filter(id => id).map(Number);
     }
     
+    // 如果没有选中基础单位或没有选中规格，隐藏区域
     if (!selectedBaseId || boundSpecIds.length === 0) {
         wrap.style.display = 'none';
         checkBox.innerHTML = '';
@@ -4799,30 +4785,86 @@ function renderGoodsUnitTree(selectedBaseId) {
     
     const sortedNames = Object.keys(grouped).sort();
     
-    // 🔥 标题单独占一行（块级元素自动换行）
-    let html = `<div style="font-size:14px;color:#333;font-weight:bold;margin-bottom:8px;">✅ 已选换算规格（共 ${selectedSpecs.length} 个）</div>`;
+    // 判断是否为线上渠道
+    const channelInput = document.getElementById('add_channel');
+    const isOnline = channelInput && channelInput.value === '线上';
     
-    // 🔥 数据从下一行开始（没有任何内联元素阻止换行）
-    sortedNames.forEach(name => {
-        const specs = grouped[name];
+    // 获取默认价格（从goods表读取）
+    const defaultSalePrice = document.getElementById('add_sale_price')?.value || '';
+    const defaultOnlineCost = document.getElementById('add_online_cost')?.value || '';
+    
+    // 获取编辑ID
+    const editId = document.getElementById('editId')?.value;
+    
+    // 存储规格价格数据（从数据库加载）
+    let specPriceMap = {};
+    if (editId && window._specPriceData) {
+        specPriceMap = window._specPriceData || {};
+    }
+    
+    // 标题
+    let html = `<div style="font-size:14px;color:#333;font-weight:bold;margin-bottom:10px;">✅ 已选换算规格（共 ${selectedSpecs.length} 个）</div>`;
+    
+    // 表头 - 根据是否线上决定列数
+    let headerCols = isOnline ? 4 : 3;
+    html += `<div style="display:grid;grid-template-columns:40px 1fr 1fr ${isOnline ? '1fr' : ''};gap:8px;padding:6px 4px;background:#f5f7fa;border-radius:4px;font-weight:bold;font-size:13px;border-bottom:2px solid #e8e8e8;margin-bottom:4px;">
+        <span>序号</span>
+        <span>规格</span>
+        <span>销售单价</span>
+        ${isOnline ? '<span>线上成本价</span>' : ''}
+    </div>`;
+    
+    let index = 0;
+    sortedNames.forEach(groupName => {
+        const specs = grouped[groupName];
         specs.sort((a, b) => a.convert_rate - b.convert_rate);
         
-        html += `<div style="padding:6px 10px;margin-bottom:6px;background:#fafafa;border-radius:4px;border:1px solid #f0f0f0;">`;
-        html += `<span style="font-weight:bold;color:#ff4d4f;font-size:14px;">📦 ${name} <span style="color:#999;font-size:12px;font-weight:normal;">（${specs.length}个规格）</span></span>`;
-        html += `<span style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;">`;
-        specs.forEach(spec => {
-            html += `<span style="padding:2px 10px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:12px;font-size:12px;color:#1890ff;">
-                ${spec.convert_rate}${baseItem.unit_name}
-            </span>`;
+        // 每个规格作为一行
+        specs.forEach((spec, idx) => {
+            index++;
+            const specId = spec.id;
+            
+            // 获取该规格已保存的价格
+            const savedData = specPriceMap[specId] || {};
+            const savedSalePrice = savedData.sale_price !== undefined && savedData.sale_price !== null ? savedData.sale_price : '';
+            const savedOnlineCost = savedData.online_cost !== undefined && savedData.online_cost !== null ? savedData.online_cost : '';
+            
+            // 决定显示的值：优先使用已保存的值，否则使用默认值
+            const displaySalePrice = savedSalePrice !== '' ? savedSalePrice : defaultSalePrice;
+            const displayOnlineCost = savedOnlineCost !== '' ? savedOnlineCost : defaultOnlineCost;
+            
+            // 已选单位时，价格输入框禁用（继承商品默认价）
+            const isDisabled = true;
+            
+            html += `<div style="display:grid;grid-template-columns:40px 1fr 1fr ${isOnline ? '1fr' : ''};gap:8px;padding:6px 4px;border-bottom:1px solid #f0f0f0;align-items:center;background:${idx % 2 === 0 ? '#fafafa' : '#fff'};border-radius:2px;">
+                <span style="font-size:13px;color:#999;">${index}</span>
+                <div style="display:flex;flex-direction:column;">
+                    <span style="font-weight:bold;font-size:14px;color:#ff4d4f;">📦 ${groupName}</span>
+                    <span style="font-size:13px;color:#666;padding-left:4px;">${spec.convert_rate}${baseItem.unit_name}</span>
+                </div>
+                <div>
+                    <input type="number" step="0.01" min="0" 
+                           class="spec-price-input" 
+                           data-spec-id="${specId}" 
+                           data-price-type="sale_price"
+                           value="${displaySalePrice}"
+                           disabled
+                           style="background:#f5f5f5;color:#666;width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;">
+                </div>
+                ${isOnline ? `<div>
+                    <input type="number" step="0.01" min="0" 
+                           class="spec-price-input" 
+                           data-spec-id="${specId}" 
+                           data-price-type="online_cost"
+                           value="${displayOnlineCost}"
+                           disabled
+                           style="background:#f5f5f5;color:#666;width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;">
+                </div>` : ''}
+            </div>`;
         });
-        html += `</span>`;
-        html += `</div>`;
     });
     
     checkBox.innerHTML = html;
-// 🔥 更新价格基准规格下拉框
-updatePriceSpecSelect();
-    
 }
 
 // ===================== 商品弹窗单位树形下拉（完整树形结构） =====================
@@ -4933,8 +4975,11 @@ function confirmGoodsUnitSelection() {
     const bindSpecInput = document.getElementById('bindSpecIds');
     const searchInput = document.getElementById('addBaseUnitSearch');
     
-    if (!tempSelectedBaseId && tempSelectedSpecIds.size > 0) {
-        const firstSpecId = Array.from(tempSelectedSpecIds)[0];
+    // 收集当前选中的规格ID
+    let selectedSpecIds = Array.from(tempSelectedSpecIds);
+    
+    if (!tempSelectedBaseId && selectedSpecIds.length > 0) {
+        const firstSpecId = selectedSpecIds[0];
         const spec = unitSpecList.find(s => s.id == parseInt(firstSpecId));
         if (spec) {
             tempSelectedBaseId = String(spec.base_unit_id);
@@ -4942,7 +4987,7 @@ function confirmGoodsUnitSelection() {
     }
     
     if (baseIdInput) baseIdInput.value = tempSelectedBaseId || '';
-    if (bindSpecInput) bindSpecInput.value = Array.from(tempSelectedSpecIds).join(',');
+    if (bindSpecInput) bindSpecInput.value = selectedSpecIds.join(',');
     
     if (searchInput && tempSelectedBaseId) {
         const baseItem = baseUnitList.find(u => u.id == parseInt(tempSelectedBaseId));
@@ -4963,45 +5008,6 @@ function confirmGoodsUnitSelection() {
     }
     
     closeGoodsUnitDropdown();
-    // 🔥 更新价格基准规格下拉框
-    updatePriceSpecSelect();
-}
-
-// 更新价格基准规格下拉框（放在 confirmGoodsUnitSelection 函数后面）
-function updatePriceSpecSelect() {
-    var select = document.getElementById('add_price_spec_id');
-    var bindSpecInput = document.getElementById('bindSpecIds');
-    var baseIdInput = document.getElementById('add_base_unit_id');
-    if (!select || !bindSpecInput) return;
-    
-    var specIds = bindSpecInput.value.split(',').filter(function(id) { return id && id.trim() !== ''; });
-    var baseId = baseIdInput ? baseIdInput.value : '';
-    
-    select.innerHTML = '<option value="">请选择规格</option>';
-    
-    if (specIds.length === 0 || !baseId) {
-        select.disabled = true;
-        return;
-    }
-    
-    select.disabled = false;
-    var baseItem = baseUnitList.find(function(b) { return b.id == parseInt(baseId); });
-    
-    specIds.forEach(function(specId) {
-        var spec = unitSpecList.find(function(s) { return s.id == parseInt(specId); });
-        if (spec) {
-            var option = document.createElement('option');
-            option.value = spec.id;
-            option.textContent = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
-            select.appendChild(option);
-        }
-    });
-    
-    // 如果有已保存的 price_spec_id，自动选中
-    var savedValue = select.dataset.savedValue;
-    if (savedValue) {
-        select.value = savedValue;
-    }
 }
 
 // 过滤树形下拉 - 搜索时不要重置置顶标志
@@ -5359,6 +5365,7 @@ openAddForm = async function () {
     tempSelectedBaseId = null;
     tempSelectedSpecIds = new Set();
     window._unitExpandState = {};
+    window._specPriceData = {};
     
     const search = $('addBaseUnitSearch');
     const hidden = $('add_base_unit_id');
@@ -5366,7 +5373,6 @@ openAddForm = async function () {
     const checkBox = $('specCheckWrap');
     const bindInput = $('bindSpecIds');
     const dropdown = document.getElementById('goodsUnitDropdown');
-    const priceSpecSelect = document.getElementById('add_price_spec_id');  // 🔥 新增
     
     if (search) search.value = '';
     if (hidden) hidden.value = '';
@@ -5374,11 +5380,6 @@ openAddForm = async function () {
     if (checkBox) checkBox.innerHTML = '';
     if (bindInput) bindInput.value = '';
     if (dropdown) dropdown.style.display = 'none';
-    if (priceSpecSelect) {  // 🔥 新增：清空价格基准规格下拉框
-        priceSpecSelect.innerHTML = '<option value="">请选择规格</option>';
-        priceSpecSelect.disabled = true;
-        delete priceSpecSelect.dataset.savedValue;
-    }
 };
 
 // 🔥 劫持 openEditForm - 编辑商品时回显单位数据
@@ -5394,12 +5395,7 @@ openEditForm = async function (goodsId) {
     tempSelectedSpecIds = new Set();
     window._unitExpandState = {};
     window._shouldPinSelected = false;
-    
-    // 🔥 保存价格基准规格到下拉框的 data 属性
-    const priceSpecSelect = document.getElementById('add_price_spec_id');
-    if (priceSpecSelect && goodsItem.price_spec_id) {
-        priceSpecSelect.dataset.savedValue = String(goodsItem.price_spec_id);
-    }
+    window._specPriceData = {};
     
     // 🔥 关键修复：只有存在 base_unit_id 时才填充
     if (goodsItem.base_unit_id) {
@@ -5414,11 +5410,23 @@ openEditForm = async function (goodsId) {
             
             tempSelectedBaseId = baseItem.id;
             
+            // 加载单位绑定和价格
             const bindRes = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${goodsId}`, {
                 headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
             });
             const bindList = await bindRes.json() || [];
             const boundIds = bindList.map(b => b.spec_id);
+            
+            // 存储价格数据
+            bindList.forEach(b => {
+                if (b.spec_id) {
+                    window._specPriceData[b.spec_id] = {
+                        sale_price: b.sale_price,
+                        online_cost: b.online_cost
+                    };
+                }
+            });
+            
             boundIds.forEach(id => tempSelectedSpecIds.add(String(id)));
             if (bindInput) bindInput.value = boundIds.join(',');
             
@@ -5452,13 +5460,6 @@ openEditForm = async function (goodsId) {
         if (bindInput) bindInput.value = '';
         if (wrap) wrap.style.display = 'none';
         if (checkBox) checkBox.innerHTML = '';
-        
-        // 🔥 新增：没有单位时，清空价格基准规格下拉框
-        if (priceSpecSelect) {
-            priceSpecSelect.innerHTML = '<option value="">请选择规格</option>';
-            priceSpecSelect.disabled = true;
-            delete priceSpecSelect.dataset.savedValue;
-        }
     }
 };
 
@@ -5521,10 +5522,6 @@ submitForm = async function () {
     // 🔥 获取单位名称
     const baseUnitName = $('addBaseUnitSearch') ? $('addBaseUnitSearch').value : '';
     
-    // 🔥 获取价格基准规格
-    const priceSpecSelect = document.getElementById('add_price_spec_id');
-    const priceSpecId = priceSpecSelect ? priceSpecSelect.value : '';
-    
     const goodsData = {
         supplier: supplier.trim(), 
         name: name.trim(), 
@@ -5539,9 +5536,7 @@ submitForm = async function () {
         last_sale_price: editId ? oldSalePrice : null,
         // 🔥 允许单位为空
         base_unit_id: baseId ? +baseId : null,
-        base_unit_name: baseUnitName || null,
-        // 🔥 新增：保存价格基准规格
-        price_spec_id: priceSpecId ? parseInt(priceSpecId) : null
+        base_unit_name: baseUnitName || null
     };
     
     try {
@@ -5600,12 +5595,26 @@ submitForm = async function () {
                 headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
             });
             
-            // 如果有选中的规格，插入新的绑定
+            // 如果有选中的规格，插入新的绑定（包含价格）
             if (specIds.length > 0) {
                 let insertSuccess = 0;
                 for (const sid of specIds) {
                     if (sid) {
                         try {
+                            // 获取该规格的销售单价和线上成本价（从输入框读取）
+                            const salePriceInput = document.querySelector(`.spec-price-input[data-spec-id="${sid}"][data-price-type="sale_price"]`);
+                            const onlineCostInput = document.querySelector(`.spec-price-input[data-spec-id="${sid}"][data-price-type="online_cost"]`);
+                            
+                            let salePriceVal = null;
+                            let onlineCostVal = null;
+                            
+                            if (salePriceInput && salePriceInput.value !== '') {
+                                salePriceVal = parseFloat(salePriceInput.value);
+                            }
+                            if (onlineCostInput && onlineCostInput.value !== '') {
+                                onlineCostVal = parseFloat(onlineCostInput.value);
+                            }
+                            
                             const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind`, {
                                 method: 'POST',
                                 headers: { 
@@ -5616,7 +5625,9 @@ submitForm = async function () {
                                 body: JSON.stringify({ 
                                     goods_id: goodsRealId, 
                                     base_unit_id: baseId ? +baseId : null,
-                                    spec_id: sid 
+                                    spec_id: sid,
+                                    sale_price: salePriceVal,
+                                    online_cost: onlineCostVal
                                 })
                             });
                             if (insertRes.ok) {
@@ -5629,7 +5640,7 @@ submitForm = async function () {
                         }
                     }
                 }
-                console.log(`✅ 已保存 ${insertSuccess}/${specIds.length} 个规格绑定`);
+                console.log(`✅ 已保存 ${insertSuccess}/${specIds.length} 个规格绑定（含价格）`);
             } else {
                 console.log('✅ 已清空所有规格绑定（无选中规格）');
             }
@@ -5649,6 +5660,7 @@ submitForm = async function () {
         tempSelectedSpecIds = new Set();
         window._unitExpandState = {};
         window._shouldPinSelected = false;
+        window._specPriceData = {};
         
         await loadGoods(true);
         if (typeof loadAllGoods === 'function') await loadAllGoods();
@@ -5743,4 +5755,10 @@ window.renderUnitPagination = renderUnitPagination;
 window.showUnitBaseList = showUnitBaseList;
 window.showUnitSpecList = showUnitSpecList;
 window.showUnitRateList = showUnitRateList;
+window.confirmGoodsUnitSelection = confirmGoodsUnitSelection;
+window.closeGoodsUnitDropdown = closeGoodsUnitDropdown;
+window.showGoodsUnitTreeDropdown = showGoodsUnitTreeDropdown;
+window.filterGoodsUnitTreeDropdown = filterGoodsUnitTreeDropdown;
+window.toggleBaseUnitSelection = toggleBaseUnitSelection;
+
 console.log('✅ 单位管理模块加载完成');
