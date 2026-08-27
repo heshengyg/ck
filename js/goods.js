@@ -1081,7 +1081,7 @@ function renderGoods() {
     }
     
     if (!filteredGoods || filteredGoods.length === 0) {
-        tb.innerHTML = '<tr><td colspan="15" style="text-align:center;padding:20px;">暂无数据</td></tr>';
+        tb.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:20px;">暂无数据</td></tr>';
         return;
     }
     
@@ -1090,7 +1090,7 @@ function renderGoods() {
     tb.innerHTML = '';
     
     if (pageData.length === 0) {
-        tb.innerHTML = '<tr><td colspan="15" style="text-align:center;padding:20px;">暂无数据</td></tr>';
+        tb.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:20px;">暂无数据</td></tr>';
         return;
     }
 
@@ -1106,8 +1106,8 @@ function renderGoods() {
         // 🔥 获取最小计量单位名称
         let baseUnitName = item.base_unit_name || '-';
         
-        // 🔥 获取价格基准规格名称（已移除，保留空显示）
-        let priceSpecName = '-';
+        // 🔥 判断是否有换算规格
+        let hasSpec = item.base_unit_id ? true : false;
         
         let delBtn = '';
         if (isUsed) {
@@ -1116,16 +1116,21 @@ function renderGoods() {
             delBtn = `<button class="btn btn-danger" onclick="deleteGoods(${item.id})">删除</button>`;
         }
         
+        // 🔥 展开按钮
+        let expandBtn = hasSpec ? 
+            `<button class="btn btn-sm btn-default" onclick="toggleSpecDetail(${item.id}, this)" style="padding:2px 8px;font-size:12px;">展开 ▼</button>` :
+            `<button class="btn btn-sm btn-default" disabled style="padding:2px 8px;font-size:12px;opacity:0.5;">无规格</button>`;
+        
         let html = `
-            <tr>
+            <tr class="goods-main-row" data-goods-id="${item.id}">
                 <td><input type="checkbox" class="item-checkbox" value="${item.id}" ${isUsed ? 'disabled' : ''}></td>
                 <td>${seqNum}</td>
                 <td>${item.supplier || ''}</td>
                 <td>${item.name || ''}</td>
                 <td>${item.spec || '-'}</td>
                 <td>${item.channel || ''}</td>
-                <td>${baseUnitName}</td>           <!-- 🔥 新增：最小计量单位 -->
-                <td>${priceSpecName}</td>           <!-- 🔥 移除价格基准规格 -->
+                <td>${baseUnitName}</td>
+                <td>-</td>  <!-- 🔥 价格基准规格列改为显示"多规格"或"-" -->
                 <td>${formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0)}</td>
                 <td>${onlineCost}</td>
                 <td>${item.tax_rate ? item.tax_rate + '%' : ''}</td>
@@ -1133,12 +1138,121 @@ function renderGoods() {
                 <td>${expire}</td>
                 <td>${item.warn_num || 0}</td>
                 <td>
+                    ${expandBtn}
                     <button class="btn btn-primary" onclick="openEditForm(${item.id})">编辑</button>
                     ${delBtn}
                 </td>
             </tr>
+            <!-- 🔥 规格详情行（默认隐藏） -->
+            <tr class="spec-detail-row" data-goods-id="${item.id}" style="display:none;">
+                <td colspan="15" style="padding:0;">
+                    <div class="spec-detail-container" style="padding:10px 20px;background:#f9fafb;border-top:1px solid #e8e8e8;">
+                        <div style="font-size:13px;color:#666;margin-bottom:6px;">📋 换算规格详情</div>
+                        <div id="specDetailContent_${item.id}" style="min-height:30px;color:#999;font-size:13px;">加载中...</div>
+                    </div>
+                </td>
+            </tr>
         `;
         tb.innerHTML += html;
+    }
+}
+
+// ========== 🔥 展开/收起规格详情 ==========
+let expandedGoodsId = null; // 当前展开的商品ID（同一时间只展开一个）
+
+async function toggleSpecDetail(goodsId, btnElement) {
+    // 如果点击的是已经展开的商品，则收起
+    if (expandedGoodsId === goodsId) {
+        // 收起
+        const detailRow = document.querySelector(`.spec-detail-row[data-goods-id="${goodsId}"]`);
+        if (detailRow) detailRow.style.display = 'none';
+        if (btnElement) btnElement.textContent = '展开 ▼';
+        expandedGoodsId = null;
+        return;
+    }
+    
+    // 收起之前展开的
+    if (expandedGoodsId !== null) {
+        const prevRow = document.querySelector(`.spec-detail-row[data-goods-id="${expandedGoodsId}"]`);
+        if (prevRow) prevRow.style.display = 'none';
+        const prevBtn = document.querySelector(`.goods-main-row[data-goods-id="${expandedGoodsId}"] .btn-default`);
+        if (prevBtn) prevBtn.textContent = '展开 ▼';
+    }
+    
+    // 展开当前
+    const detailRow = document.querySelector(`.spec-detail-row[data-goods-id="${goodsId}"]`);
+    if (detailRow) {
+        detailRow.style.display = 'table-row';
+        if (btnElement) btnElement.textContent = '收起 ▲';
+        expandedGoodsId = goodsId;
+        
+        // 加载规格数据
+        await loadSpecDetailContent(goodsId);
+    }
+}
+
+// ========== 🔥 加载规格详情内容 ==========
+async function loadSpecDetailContent(goodsId) {
+    const container = document.getElementById(`specDetailContent_${goodsId}`);
+    if (!container) return;
+    
+    try {
+        // 获取该商品的所有规格绑定（含价格）
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${goodsId}&select=*`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const bindList = await res.json() || [];
+        
+        if (bindList.length === 0) {
+            container.innerHTML = '<div style="color:#999;">该商品暂无换算规格</div>';
+            return;
+        }
+        
+        // 获取基础单位名称
+        const goodsItem = allGoods.find(g => g.id == goodsId);
+        const baseUnit = goodsItem ? goodsItem.base_unit_name || '单位' : '单位';
+        
+        // 获取规格详情
+        let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+        html += '<thead><tr style="background:#e8ecf1;">';
+        html += '<th style="padding:6px 10px;text-align:center;width:50px;">序号</th>';
+        html += '<th style="padding:6px 10px;text-align:center;">规格名称</th>';
+        html += '<th style="padding:6px 10px;text-align:center;">换算比例</th>';
+        html += '<th style="padding:6px 10px;text-align:center;">销售单价</th>';
+        html += '<th style="padding:6px 10px;text-align:center;">线上成本价</th>';
+        html += '</tr></thead>';
+        html += '<tbody>';
+        
+        let sortedList = bindList.sort((a, b) => a.id - b.id);
+        // 获取规格名称
+        const specIds = sortedList.map(b => b.spec_id).filter(id => id);
+        const specRes = await fetch(`${SUPABASE_URL}/rest/v1/unit_spec?id=in.(${specIds.join(',')})`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const specList = await specRes.json() || [];
+        
+        sortedList.forEach((bind, idx) => {
+            const spec = specList.find(s => s.id == bind.spec_id);
+            const specName = spec ? spec.show_name : '未知规格';
+            const convertRate = spec ? spec.convert_rate : '-';
+            
+            html += '<tr style="border-bottom:1px solid #f0f0f0;">';
+            html += '<td style="padding:6px 10px;text-align:center;">' + (idx + 1) + '</td>';
+            html += '<td style="padding:6px 10px;text-align:center;">' + specName + '</td>';
+            html += '<td style="padding:6px 10px;text-align:center;">';
+            html += '<span style="display:inline-block;padding:1px 12px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:10px;font-size:12px;color:#1890ff;">' + convertRate + baseUnit + '</span>';
+            html += '</td>';
+            html += '<td style="padding:6px 10px;text-align:center;font-weight:bold;color:#333;">' + (bind.sale_price !== null && bind.sale_price !== undefined ? '￥' + Number(bind.sale_price).toFixed(2) : '—') + '</td>';
+            html += '<td style="padding:6px 10px;text-align:center;font-weight:bold;color:#333;">' + (bind.online_cost !== null && bind.online_cost !== undefined ? '￥' + Number(bind.online_cost).toFixed(2) : '—') + '</td>';
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        
+    } catch (e) {
+        console.error('加载规格详情失败:', e);
+        container.innerHTML = '<div style="color:#ff6b6b;">加载失败，请刷新重试</div>';
     }
 }
 
