@@ -1109,11 +1109,16 @@ function renderGoods() {
         // 🔥 判断是否有换算规格（即是否选了单位）
         let hasSpec = item.base_unit_id ? true : false;
         
-        // ========== 🔥 核心修改：已选单位 → 显示 "-"，未选单位 → 显示价格 ==========
-        let displaySalePrice = hasSpec ? '-' : (formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0));
-        let displayOnlineCost = hasSpec ? '-' : onlineCost;
+        // ========== 🔥 判断是否为线下渠道 ==========
+        let isOffline = item.channel === '线下';
         
-        // ========== 🔥 删除按钮（恢复原来大小） ==========
+        // ========== 🔥 线上成本价：线下显示 "-"，线上显示实际值 ==========
+        let displayOnlineCost = isOffline ? '-' : onlineCost;
+        
+        // ========== 🔥 销售单价：已选单位 → 显示 "-"，未选单位 → 显示价格 ==========
+        let displaySalePrice = hasSpec ? '-' : (formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0));
+        
+        // ========== 🔥 删除按钮 ==========
         let delBtn = '';
         if (isUsed) {
             delBtn = `<button class="btn btn-danger" disabled style="opacity:0.5;padding:4px 14px;font-size:13px;border:none;border-radius:4px;cursor:not-allowed;">删除</button>`;
@@ -1121,7 +1126,7 @@ function renderGoods() {
             delBtn = `<button class="btn btn-danger" onclick="deleteGoods(${item.id})" style="padding:4px 14px;font-size:13px;border:none;border-radius:4px;cursor:pointer;background:#ff4d4f;color:#fff;">删除</button>`;
         }
         
-        // ========== 🔥 编辑按钮（恢复原来大小） ==========
+        // ========== 🔥 编辑按钮 ==========
         let editBtn = `<button class="btn btn-primary" onclick="openEditForm(${item.id})" style="padding:4px 14px;font-size:13px;border:none;border-radius:4px;cursor:pointer;background:#1890ff;color:#fff;">编辑</button>`;
         
         // ========== 🔥 规格列：有内容显示内容，无内容留空；展开按钮用 ▼/▲ ==========
@@ -1134,6 +1139,15 @@ function renderGoods() {
         // 🔥 规格列居中
         let specCellContent = specDisplay ? `${specDisplay} ${expandBtnHtml}` : expandBtnHtml;
         
+        // ========== 🔥 销售渠道颜色：线上绿色，线下红色 ==========
+        let channelDisplay = item.channel || '';
+        let channelStyle = '';
+        if (channelDisplay === '线上') {
+            channelStyle = 'style="color:#52c41a;font-weight:bold;"';
+        } else if (channelDisplay === '线下') {
+            channelStyle = 'style="color:#ff4d4f;font-weight:bold;"';
+        }
+        
         let html = `
             <tr class="goods-main-row" data-goods-id="${item.id}">
                 <td><input type="checkbox" class="item-checkbox" value="${item.id}" ${isUsed ? 'disabled' : ''}></td>
@@ -1141,7 +1155,7 @@ function renderGoods() {
                 <td>${item.supplier || ''}</td>
                 <td>${item.name || ''}</td>
                 <td style="text-align:center;">${specCellContent}</td>
-                <td>${item.channel || ''}</td>
+                <td ${channelStyle}>${channelDisplay}</td>
                 <td>${baseUnitName}</td>
                 <td>${displaySalePrice}</td>
                 <td>${displayOnlineCost}</td>
