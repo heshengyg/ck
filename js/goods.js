@@ -4847,18 +4847,18 @@ function renderGoodsUnitTree(selectedBaseId) {
         specPriceMap = window._specPriceData || {};
     }
     
-    // ====== 标题独立一行 ======
-    var html = '<div style="font-size:14px;color:#333;font-weight:bold;margin-bottom:10px;display:block;width:100%;">✅ 已选换算规格（共 ' + selectedSpecs.length + ' 个）</div>';
+    // ====== 标题独立一行（居中） ======
+    var html = '<div style="font-size:14px;color:#333;font-weight:bold;margin-bottom:10px;display:block;width:100%;text-align:center;">✅ 已选换算规格（共 ' + selectedSpecs.length + ' 个）</div>';
     
-    // ====== 使用表格 ======
+    // ====== 使用表格，所有单元格居中 ======
     html += '<table style="width:100%;border-collapse:collapse;font-size:14px;">';
-    // 表头
+    // 表头 - 居中
     html += '<thead><tr style="background:#f5f7fa;border-bottom:2px solid #e8e8e8;">';
-    html += '<th style="padding:8px 6px;text-align:left;width:50px;font-weight:bold;">序号</th>';
-    html += '<th style="padding:8px 6px;text-align:left;font-weight:bold;">规格</th>';
-    html += '<th style="padding:8px 6px;text-align:left;font-weight:bold;width:120px;">销售单价</th>';
+    html += '<th style="padding:8px 6px;text-align:center;width:50px;font-weight:bold;">序号</th>';
+    html += '<th style="padding:8px 6px;text-align:center;font-weight:bold;">规格</th>';
+    html += '<th style="padding:8px 6px;text-align:center;font-weight:bold;width:140px;">销售单价</th>';
     if (isOnline) {
-        html += '<th style="padding:8px 6px;text-align:left;font-weight:bold;width:120px;">线上成本价</th>';
+        html += '<th style="padding:8px 6px;text-align:center;font-weight:bold;width:140px;">线上成本价</th>';
     }
     html += '</tr></thead>';
     html += '<tbody>';
@@ -4885,36 +4885,36 @@ function renderGoodsUnitTree(selectedBaseId) {
             var bgColor = (idx % 2 === 0) ? '#fafafa' : '#fff';
             
             html += '<tr style="background:' + bgColor + ';border-bottom:1px solid #f0f0f0;">';
-            html += '<td style="padding:8px 6px;color:#999;font-size:13px;vertical-align:middle;">' + index + '</td>';
+            html += '<td style="padding:8px 6px;text-align:center;color:#999;font-size:13px;vertical-align:middle;">' + index + '</td>';
             
-            // 规格列：包含 包装名 + 换算结果（带倒角框）
-            html += '<td style="padding:8px 6px;vertical-align:middle;">';
+            // 规格列：包含 包装名 + 换算结果（带倒角框），居中
+            html += '<td style="padding:8px 6px;text-align:center;vertical-align:middle;">';
             html += '<div style="font-weight:bold;font-size:14px;color:#ff4d4f;">📦 ' + groupName + '</div>';
-            // 🔥 换算结果用倒角框 + 背景色
-            html += '<div style="margin-top:2px;">';
-            html += '<span style="display:inline-block;padding:2px 12px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:12px;font-size:13px;color:#1890ff;">' + spec.convert_rate + baseItem.unit_name + '</span>';
+            // 🔥 换算结果用倒角框 + 背景色，居中
+            html += '<div style="margin-top:3px;text-align:center;">';
+            html += '<span style="display:inline-block;padding:2px 14px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:12px;font-size:13px;color:#1890ff;">' + spec.convert_rate + baseItem.unit_name + '</span>';
             html += '</div>';
             html += '</td>';
             
-            // 销售单价输入框
-            html += '<td style="padding:8px 6px;vertical-align:middle;">';
+            // 销售单价输入框 - 居中
+            html += '<td style="padding:8px 6px;text-align:center;vertical-align:middle;">';
             html += '<input type="number" step="0.01" min="0" ';
             html += 'class="spec-price-input" ';
             html += 'data-spec-id="' + specId + '" ';
             html += 'data-price-type="sale_price" ';
             html += 'value="' + displaySalePrice + '" ';
-            html += 'style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;" ';
+            html += 'style="width:100%;max-width:120px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;text-align:center;" ';
             html += 'placeholder="输入销售单价">';
             html += '</td>';
             
             if (isOnline) {
-                html += '<td style="padding:8px 6px;vertical-align:middle;">';
+                html += '<td style="padding:8px 6px;text-align:center;vertical-align:middle;">';
                 html += '<input type="number" step="0.01" min="0" ';
                 html += 'class="spec-price-input" ';
                 html += 'data-spec-id="' + specId + '" ';
                 html += 'data-price-type="online_cost" ';
                 html += 'value="' + displayOnlineCost + '" ';
-                html += 'style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;" ';
+                html += 'style="width:100%;max-width:120px;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;text-align:center;" ';
                 html += 'placeholder="输入线上成本价">';
                 html += '</td>';
             }
@@ -4927,7 +4927,6 @@ function renderGoodsUnitTree(selectedBaseId) {
     
     checkBox.innerHTML = html;
 }
-
 // ===================== 商品弹窗单位树形下拉（完整树形结构） =====================
 
 // 全局临时存储选中的单位数据（仅在单位下拉弹窗内使用）
