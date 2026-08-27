@@ -1109,14 +1109,19 @@ function renderGoods() {
         // 🔥 判断是否有换算规格（即是否选了单位）
         let hasSpec = item.base_unit_id ? true : false;
         
-        // ========== 🔥 判断是否为线下渠道 ==========
+        // 🔥 判断是否为线下渠道
         let isOffline = item.channel === '线下';
         
-        // ========== 🔥 线上成本价：线下显示 "-"，线上显示实际值 ==========
-        let displayOnlineCost = isOffline ? '-' : onlineCost;
-        
-        // ========== 🔥 销售单价：已选单位 → 显示 "-"，未选单位 → 显示价格 ==========
+        // ========== 🔥 销售单价：有单位 → "-"，无单位 → 显示价格 ==========
         let displaySalePrice = hasSpec ? '-' : (formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0));
+        
+        // ========== 🔥 线上成本价：有单位 → "-"，无单位+线下 → "-"，无单位+线上 → 显示价格 ==========
+        let displayOnlineCost = '-';
+        if (!hasSpec && !isOffline) {
+            // 无单位 且 线上 → 显示成本价
+            displayOnlineCost = onlineCost;
+        }
+        // 其他情况（有单位 或 线下）保持 "-"
         
         // ========== 🔥 删除按钮 ==========
         let delBtn = '';
