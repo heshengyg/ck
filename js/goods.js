@@ -834,6 +834,25 @@ function openAddForm() {
 
         toggleOnlineCostInput();
 
+        // ========== 🆕 新增：未选单位时，原价格输入框可输入 ==========
+        var salePriceInput = document.getElementById('add_sale_price');
+        var onlineCostInput = document.getElementById('add_online_cost');
+        if (salePriceInput) {
+            salePriceInput.disabled = false;
+            salePriceInput.style.background = '#fff';
+        }
+        if (onlineCostInput) {
+            var channel = document.getElementById('add_channel')?.value;
+            if (channel === '线上') {
+                onlineCostInput.disabled = false;
+                onlineCostInput.style.background = '#fff';
+            } else {
+                onlineCostInput.disabled = true;
+                onlineCostInput.style.background = '#f5f5f5';
+            }
+        }
+        // ========== 🆕 结束 ==========
+
         document.getElementById('formModal').style.display = 'block';
     } catch (e) {
         console.error('openAddForm 执行错误:', e);
@@ -4752,10 +4771,24 @@ function renderGoodsUnitTree(selectedBaseId) {
         boundSpecIds = bindInput.value.split(',').filter(id => id).map(Number);
     }
     
-    // 如果没有选中基础单位或没有选中规格，隐藏区域
+    // 如果没有选中基础单位或没有选中规格，隐藏区域，并恢复原销售单价/线上成本价的输入状态
     if (!selectedBaseId || boundSpecIds.length === 0) {
         wrap.style.display = 'none';
         checkBox.innerHTML = '';
+        // 恢复原销售单价和线上成本价为可输入
+        const salePriceInput = document.getElementById('add_sale_price');
+        const onlineCostInput = document.getElementById('add_online_cost');
+        if (salePriceInput) {
+            salePriceInput.disabled = false;
+            salePriceInput.style.background = '#fff';
+        }
+        if (onlineCostInput) {
+            const channel = document.getElementById('add_channel')?.value;
+            if (channel === '线上') {
+                onlineCostInput.disabled = false;
+                onlineCostInput.style.background = '#fff';
+            }
+        }
         return;
     }
     
@@ -4766,6 +4799,18 @@ function renderGoodsUnitTree(selectedBaseId) {
     if (!baseItem) {
         wrap.style.display = 'none';
         return;
+    }
+    
+    // 已选单位 → 禁用原销售单价和线上成本价输入框
+    const salePriceInput = document.getElementById('add_sale_price');
+    const onlineCostInput = document.getElementById('add_online_cost');
+    if (salePriceInput) {
+        salePriceInput.disabled = true;
+        salePriceInput.style.background = '#f5f5f5';
+    }
+    if (onlineCostInput) {
+        onlineCostInput.disabled = true;
+        onlineCostInput.style.background = '#f5f5f5';
     }
     
     const selectedSpecs = unitSpecList.filter(s => boundSpecIds.includes(s.id));
@@ -4802,12 +4847,11 @@ function renderGoodsUnitTree(selectedBaseId) {
         specPriceMap = window._specPriceData || {};
     }
     
-    // 标题
-    let html = `<div style="font-size:14px;color:#333;font-weight:bold;margin-bottom:10px;">✅ 已选换算规格（共 ${selectedSpecs.length} 个）</div>`;
+    // ====== 标题独立一行 ======
+    let html = `<div style="font-size:14px;color:#333;font-weight:bold;margin-bottom:10px;display:block;width:100%;">✅ 已选换算规格（共 ${selectedSpecs.length} 个）</div>`;
     
-    // 表头 - 根据是否线上决定列数
-    let headerCols = isOnline ? 4 : 3;
-    html += `<div style="display:grid;grid-template-columns:40px 1fr 1fr ${isOnline ? '1fr' : ''};gap:8px;padding:6px 4px;background:#f5f7fa;border-radius:4px;font-weight:bold;font-size:13px;border-bottom:2px solid #e8e8e8;margin-bottom:4px;">
+    // ====== 表头（与标题分开） ======
+    html += `<div style="display:grid;grid-template-columns:40px 1fr 1.2fr ${isOnline ? '1.2fr' : ''};gap:8px;padding:6px 4px;background:#f5f7fa;border-radius:4px;font-weight:bold;font-size:13px;border-bottom:2px solid #e8e8e8;margin-bottom:4px;">
         <span>序号</span>
         <span>规格</span>
         <span>销售单价</span>
@@ -4829,14 +4873,12 @@ function renderGoodsUnitTree(selectedBaseId) {
             const savedSalePrice = savedData.sale_price !== undefined && savedData.sale_price !== null ? savedData.sale_price : '';
             const savedOnlineCost = savedData.online_cost !== undefined && savedData.online_cost !== null ? savedData.online_cost : '';
             
-            // 决定显示的值：优先使用已保存的值，否则使用默认值
+            // 显示的值：优先使用已保存的值，否则使用默认值
             const displaySalePrice = savedSalePrice !== '' ? savedSalePrice : defaultSalePrice;
             const displayOnlineCost = savedOnlineCost !== '' ? savedOnlineCost : defaultOnlineCost;
             
-            // 已选单位时，价格输入框禁用（继承商品默认价）
-            const isDisabled = true;
-            
-            html += `<div style="display:grid;grid-template-columns:40px 1fr 1fr ${isOnline ? '1fr' : ''};gap:8px;padding:6px 4px;border-bottom:1px solid #f0f0f0;align-items:center;background:${idx % 2 === 0 ? '#fafafa' : '#fff'};border-radius:2px;">
+            // ====== 输入框可编辑（取消 disabled） ======
+            html += `<div style="display:grid;grid-template-columns:40px 1fr 1.2fr ${isOnline ? '1.2fr' : ''};gap:8px;padding:6px 4px;border-bottom:1px solid #f0f0f0;align-items:center;background:${idx % 2 === 0 ? '#fafafa' : '#fff'};border-radius:2px;">
                 <span style="font-size:13px;color:#999;">${index}</span>
                 <div style="display:flex;flex-direction:column;">
                     <span style="font-weight:bold;font-size:14px;color:#ff4d4f;">📦 ${groupName}</span>
@@ -4848,8 +4890,8 @@ function renderGoodsUnitTree(selectedBaseId) {
                            data-spec-id="${specId}" 
                            data-price-type="sale_price"
                            value="${displaySalePrice}"
-                           disabled
-                           style="background:#f5f5f5;color:#666;width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;">
+                           style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;"
+                           placeholder="输入销售单价">
                 </div>
                 ${isOnline ? `<div>
                     <input type="number" step="0.01" min="0" 
@@ -4857,8 +4899,8 @@ function renderGoodsUnitTree(selectedBaseId) {
                            data-spec-id="${specId}" 
                            data-price-type="online_cost"
                            value="${displayOnlineCost}"
-                           disabled
-                           style="background:#f5f5f5;color:#666;width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;">
+                           style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;box-sizing:border-box;"
+                           placeholder="输入线上成本价">
                 </div>` : ''}
             </div>`;
         });
@@ -4866,7 +4908,6 @@ function renderGoodsUnitTree(selectedBaseId) {
     
     checkBox.innerHTML = html;
 }
-
 // ===================== 商品弹窗单位树形下拉（完整树形结构） =====================
 
 // 全局临时存储选中的单位数据（仅在单位下拉弹窗内使用）
@@ -4997,10 +5038,37 @@ function confirmGoodsUnitSelection() {
     }
     
     if (tempSelectedBaseId) {
+        // 已选单位 → 禁用原销售单价和线上成本价
+        const salePriceInput = document.getElementById('add_sale_price');
+        const onlineCostInput = document.getElementById('add_online_cost');
+        if (salePriceInput) {
+            salePriceInput.disabled = true;
+            salePriceInput.style.background = '#f5f5f5';
+        }
+        if (onlineCostInput) {
+            onlineCostInput.disabled = true;
+            onlineCostInput.style.background = '#f5f5f5';
+        }
+        
         renderGoodsUnitTree(parseInt(tempSelectedBaseId));
         const wrap = document.getElementById('specMultiWrap');
         if (wrap) wrap.style.display = 'block';
     } else {
+        // 未选单位 → 恢复原销售单价和线上成本价为可输入
+        const salePriceInput = document.getElementById('add_sale_price');
+        const onlineCostInput = document.getElementById('add_online_cost');
+        if (salePriceInput) {
+            salePriceInput.disabled = false;
+            salePriceInput.style.background = '#fff';
+        }
+        if (onlineCostInput) {
+            const channel = document.getElementById('add_channel')?.value;
+            if (channel === '线上') {
+                onlineCostInput.disabled = false;
+                onlineCostInput.style.background = '#fff';
+            }
+        }
+        
         const wrap = document.getElementById('specMultiWrap');
         if (wrap) wrap.style.display = 'none';
         const checkBox = document.getElementById('specCheckWrap');
@@ -5009,7 +5077,6 @@ function confirmGoodsUnitSelection() {
     
     closeGoodsUnitDropdown();
 }
-
 // 过滤树形下拉 - 搜索时不要重置置顶标志
 function filterGoodsUnitTreeDropdown() {
     // 搜索时不重新置顶
@@ -5315,7 +5382,7 @@ function renderGoodsUnitTreeDropdownContent() {
     }
 }
 
-// 🔥 新增：切换一级单位选中状态（放在 renderGoodsUnitTreeDropdownContent 函数后面）
+// 🔥 新增：切换一级单位选中状态
 function toggleBaseUnitSelection(baseId) {
     var targetId = String(baseId);
     var currentId = tempSelectedBaseId !== null && tempSelectedBaseId !== '' ? String(tempSelectedBaseId) : null;
@@ -5326,9 +5393,13 @@ function toggleBaseUnitSelection(baseId) {
             if (confirm('取消选中将清空已选换算规格，确定？')) {
                 tempSelectedSpecIds.clear();
                 tempSelectedBaseId = null;
+                // 恢复原价格输入框
+                restorePriceInputs();
             }
         } else {
             tempSelectedBaseId = null;
+            // 恢复原价格输入框
+            restorePriceInputs();
         }
     } else {
         // 切换到新一级
@@ -5339,10 +5410,50 @@ function toggleBaseUnitSelection(baseId) {
             tempSelectedSpecIds.clear();
         }
         tempSelectedBaseId = targetId;
+        // 禁用原价格输入框
+        disablePriceInputs();
     }
     renderGoodsUnitTreeDropdownContent();
 }
 
+// 辅助函数：恢复价格输入框
+function restorePriceInputs() {
+    const salePriceInput = document.getElementById('add_sale_price');
+    const onlineCostInput = document.getElementById('add_online_cost');
+    if (salePriceInput) {
+        salePriceInput.disabled = false;
+        salePriceInput.style.background = '#fff';
+    }
+    if (onlineCostInput) {
+        const channel = document.getElementById('add_channel')?.value;
+        if (channel === '线上') {
+            onlineCostInput.disabled = false;
+            onlineCostInput.style.background = '#fff';
+        } else {
+            onlineCostInput.disabled = true;
+            onlineCostInput.style.background = '#f5f5f5';
+        }
+    }
+    // 隐藏规格展示区域
+    const wrap = document.getElementById('specMultiWrap');
+    if (wrap) wrap.style.display = 'none';
+    const checkBox = document.getElementById('specCheckWrap');
+    if (checkBox) checkBox.innerHTML = '';
+}
+
+// 辅助函数：禁用价格输入框
+function disablePriceInputs() {
+    const salePriceInput = document.getElementById('add_sale_price');
+    const onlineCostInput = document.getElementById('add_online_cost');
+    if (salePriceInput) {
+        salePriceInput.disabled = true;
+        salePriceInput.style.background = '#f5f5f5';
+    }
+    if (onlineCostInput) {
+        onlineCostInput.disabled = true;
+        onlineCostInput.style.background = '#f5f5f5';
+    }
+}
 function onGoodsBaseUnitRadioChange(baseId) {
     const hiddenInput = $('add_base_unit_id');
     if (hiddenInput) hiddenInput.value = baseId;
@@ -5446,6 +5557,20 @@ openEditForm = async function (goodsId) {
             }
             
             renderGoodsUnitTree(baseItem.id);
+            
+            // ========== 🆕 已选单位 → 禁用原价格输入框 ==========
+            const salePriceInput = document.getElementById('add_sale_price');
+            const onlineCostInput = document.getElementById('add_online_cost');
+            if (salePriceInput) {
+                salePriceInput.disabled = true;
+                salePriceInput.style.background = '#f5f5f5';
+            }
+            if (onlineCostInput) {
+                onlineCostInput.disabled = true;
+                onlineCostInput.style.background = '#f5f5f5';
+            }
+            // ========== 🆕 结束 ==========
+            
         }
     } else {
         // 🔥 没有 base_unit_id 时，清空单位字段
@@ -5460,9 +5585,27 @@ openEditForm = async function (goodsId) {
         if (bindInput) bindInput.value = '';
         if (wrap) wrap.style.display = 'none';
         if (checkBox) checkBox.innerHTML = '';
+        
+        // ========== 🆕 未选单位 → 恢复原价格输入框可输入 ==========
+        const salePriceInput = document.getElementById('add_sale_price');
+        const onlineCostInput = document.getElementById('add_online_cost');
+        if (salePriceInput) {
+            salePriceInput.disabled = false;
+            salePriceInput.style.background = '#fff';
+        }
+        if (onlineCostInput) {
+            const channel = document.getElementById('add_channel')?.value;
+            if (channel === '线上') {
+                onlineCostInput.disabled = false;
+                onlineCostInput.style.background = '#fff';
+            } else {
+                onlineCostInput.disabled = true;
+                onlineCostInput.style.background = '#f5f5f5';
+            }
+        }
+        // ========== 🆕 结束 ==========
     }
 };
-
 const oldSubmitForm = submitForm;
 submitForm = async function () {
     const baseIdInput = $('add_base_unit_id');
