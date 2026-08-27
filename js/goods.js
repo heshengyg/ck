@@ -1081,7 +1081,7 @@ function renderGoods() {
     }
     
     if (!filteredGoods || filteredGoods.length === 0) {
-        tb.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:20px;">暂无数据</td></tr>';
+        tb.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px;">暂无数据</td></tr>';
         return;
     }
     
@@ -1090,7 +1090,7 @@ function renderGoods() {
     tb.innerHTML = '';
     
     if (pageData.length === 0) {
-        tb.innerHTML = '<tr><td colspan="16" style="text-align:center;padding:20px;">暂无数据</td></tr>';
+        tb.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px;">暂无数据</td></tr>';
         return;
     }
 
@@ -1130,7 +1130,7 @@ function renderGoods() {
                 <td>${item.spec || '-'}</td>
                 <td>${item.channel || ''}</td>
                 <td>${baseUnitName}</td>
-                <td>-</td>  <!-- 🔥 价格基准规格列改为显示"多规格"或"-" -->
+                <!-- 🔥 删除了价格基准规格列（原第8列） -->
                 <td>${formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0)}</td>
                 <td>${onlineCost}</td>
                 <td>${item.tax_rate ? item.tax_rate + '%' : ''}</td>
@@ -1145,7 +1145,7 @@ function renderGoods() {
             </tr>
             <!-- 🔥 规格详情行（默认隐藏） -->
             <tr class="spec-detail-row" data-goods-id="${item.id}" style="display:none;">
-                <td colspan="15" style="padding:0;">
+                <td colspan="14" style="padding:0;">
                     <div class="spec-detail-container" style="padding:10px 20px;background:#f9fafb;border-top:1px solid #e8e8e8;">
                         <div style="font-size:13px;color:#666;margin-bottom:6px;">📋 换算规格详情</div>
                         <div id="specDetailContent_${item.id}" style="min-height:30px;color:#999;font-size:13px;">加载中...</div>
@@ -1156,7 +1156,6 @@ function renderGoods() {
         tb.innerHTML += html;
     }
 }
-
 // ========== 🔥 展开/收起规格详情 ==========
 let expandedGoodsId = null; // 当前展开的商品ID（同一时间只展开一个）
 
