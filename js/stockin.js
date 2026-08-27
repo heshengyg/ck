@@ -1443,15 +1443,18 @@ async function renderStockIn() {
             let amount = formatMoney((item.in_price || 0) * item.in_num);
             let isUsed = idUsedMap[item.id] || false;
             
-            // ========== 🔥 优化规格显示逻辑 ==========
-            // 如果有 unit_spec_id，从 specMap 中查找规格名称
-            // 否则显示 "-"
+            // ========== 🔥 优化规格显示逻辑（分两行） ==========
             let specDisplay = '-';
             if (item.unit_spec_id && specMap[item.unit_spec_id]) {
                 const spec = specMap[item.unit_spec_id];
                 // 获取基础单位名称
                 const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
-                specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+                const baseName = baseItem ? baseItem.unit_name : '';
+                // 🔥 分两行显示：第一行规格名称，第二行换算关系
+                specDisplay = `<div style="display:flex;flex-direction:column;align-items:center;line-height:1.4;">
+                    <span style="font-weight:bold;font-size:14px;">${spec.show_name}</span>
+                    <span style="font-size:12px;color:#999;">${spec.convert_rate}${baseName}</span>
+                </div>`;
             }
             
             let btnHtml = '';
@@ -1474,7 +1477,7 @@ async function renderStockIn() {
         <td>${start + idx + 1}</td>
         <td>${item.supplier || ''}</td>
         <td>${item.goodsName || ''}</td>
-        <td>${specDisplay}</td>
+        <td style="text-align:center;">${specDisplay}</td>
         <td>${item.settleType || ''}</td>
         <td>${formatMoney(item.in_price)}</td>
         <td>${item.in_num}</td>
