@@ -1163,8 +1163,108 @@ function renderGoods() {
         `;
         tb.innerHTML += html;
     }
+}function renderGoods() {
+    const goodsTbody = document.getElementById('goodsList');
+    if (goodsTbody) {
+        goodsTbody.innerHTML = '';
+    }
+
+    let tb = document.getElementById('goodsList');
+    if (!tb) {
+        console.warn('goodsList元素不存在，等待重试...');
+        setTimeout(() => renderGoods(), 100);
+        return;
+    }
+    
+    if (!filteredGoods || filteredGoods.length === 0) {
+        tb.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px;">暂无数据</td></tr>';
+        return;
+    }
+    
+    let start = (currentPage - 1) * pageSize;
+    let pageData = filteredGoods.slice(start, start + pageSize);
+    tb.innerHTML = '';
+    
+    if (pageData.length === 0) {
+        tb.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px;">暂无数据</td></tr>';
+        return;
+    }
+
+    for (let idx = 0; idx < pageData.length; idx++) {
+        const item = pageData[idx];
+        const seqNum = start + idx + 1;
+
+        let shelfText = (item.shelf_life_num && item.shelf_life_unit) ? `${item.shelf_life_num}${item.shelf_life_unit}` : '';
+        let expire = calculateExpireDays ? calculateExpireDays(item.shelf_life_num, item.shelf_life_unit) : '';
+        let onlineCost = formatMoney ? formatMoney(item.online_cost) : (item.online_cost || 0);
+        let isUsed = goodsUsedCache.get(item.id) ?? false;
+        
+        // 🔥 获取最小计量单位名称
+        let baseUnitName = item.base_unit_name || '-';
+        
+        // 🔥 判断是否有换算规格（即是否选了单位）
+        let hasSpec = item.base_unit_id ? true : false;
+        
+        // ========== 🔥 核心修改：已选单位 → 显示 "-"，未选单位 → 显示价格 ==========
+        let displaySalePrice = hasSpec ? '-' : (formatMoney ? formatMoney(item.sale_price) : (item.sale_price || 0));
+        let displayOnlineCost = hasSpec ? '-' : onlineCost;
+        
+        // ========== 🔥 删除按钮 ==========
+        let delBtn = '';
+        if (isUsed) {
+            delBtn = `<button class="btn btn-sm btn-danger" disabled style="padding:2px 12px;font-size:12px;border:none;border-radius:3px;opacity:0.5;cursor:not-allowed;white-space:nowrap;">删除</button>`;
+        } else {
+            delBtn = `<button class="btn btn-sm btn-danger" onclick="deleteGoods(${item.id})" style="padding:2px 12px;font-size:12px;border:none;border-radius:3px;cursor:pointer;background:#ff4d4f;color:#fff;white-space:nowrap;">删除</button>`;
+        }
+        
+        // ========== 🔥 编辑按钮 ==========
+        let editBtn = `<button class="btn btn-sm btn-primary" onclick="openEditForm(${item.id})" style="padding:2px 12px;font-size:12px;border:none;border-radius:3px;cursor:pointer;background:#1890ff;color:#fff;white-space:nowrap;">编辑</button>`;
+        
+        // ========== 🔥 规格列：有内容显示内容，无内容留空；展开按钮用 ▼/▲ ==========
+        let specDisplay = item.spec || '';
+        let expandBtnHtml = '';
+        if (hasSpec) {
+            // 默认显示 ▼（展开），点击后由 toggleSpecDetail 切换为 ▲
+            expandBtnHtml = `<button class="spec-expand-btn" data-goods-id="${item.id}" onclick="toggleSpecDetail(${item.id}, this)" style="padding:0 6px;font-size:12px;border:1px solid #1890ff;color:#1890ff;background:#fff;border-radius:3px;cursor:pointer;margin-left:4px;white-space:nowrap;line-height:20px;">▼</button>`;
+        }
+        
+        // 🔥 规格列居中：flex 布局让内容居中
+        let specCellContent = specDisplay ? `${specDisplay} ${expandBtnHtml}` : expandBtnHtml;
+        
+        let html = `
+            <tr class="goods-main-row" data-goods-id="${item.id}">
+                <td><input type="checkbox" class="item-checkbox" value="${item.id}" ${isUsed ? 'disabled' : ''}></td>
+                <td>${seqNum}</td>
+                <td>${item.supplier || ''}</td>
+                <td>${item.name || ''}</td>
+                <td style="text-align:center;">${specCellContent}</td>
+                <td>${item.channel || ''}</td>
+                <td>${baseUnitName}</td>
+                <td>${displaySalePrice}</td>
+                <td>${displayOnlineCost}</td>
+                <td>${item.tax_rate ? item.tax_rate + '%' : ''}</td>
+                <td>${shelfText}</td>
+                <td>${expire}</td>
+                <td>${item.warn_num || 0}</td>
+                <td>
+                    ${editBtn}
+                    ${delBtn}
+                </td>
+            </tr>
+            <!-- 🔥 规格详情行（默认隐藏） -->
+            <tr class="spec-detail-row" data-goods-id="${item.id}" style="display:none;">
+                <td colspan="14" style="padding:0;">
+                    <div class="spec-detail-container" style="padding:10px 20px;background:#f9fafb;border-top:1px solid #e8e8e8;">
+                        <div style="font-size:13px;color:#666;margin-bottom:6px;">📋 换算规格详情</div>
+                        <div id="specDetailContent_${item.id}" style="min-height:30px;color:#999;font-size:13px;">加载中...</div>
+                    </div>
+                </td>
+            </tr>
+        `;
+        tb.innerHTML += html;
+    }
 }
-// ========== 🔥 展开/收起规格详情 ==========
+// ========== 🔥 展开/收起规格详情（使用 ▼/▲ 切换） ==========
 let expandedGoodsId = null; // 当前展开的商品ID（同一时间只展开一个）
 
 async function toggleSpecDetail(goodsId, btnElement) {
@@ -1173,7 +1273,8 @@ async function toggleSpecDetail(goodsId, btnElement) {
         // 收起
         const detailRow = document.querySelector(`.spec-detail-row[data-goods-id="${goodsId}"]`);
         if (detailRow) detailRow.style.display = 'none';
-        if (btnElement) btnElement.textContent = '展开 ▼';
+        // 切换为 ▼
+        if (btnElement) btnElement.textContent = '▼';
         expandedGoodsId = null;
         return;
     }
@@ -1182,22 +1283,22 @@ async function toggleSpecDetail(goodsId, btnElement) {
     if (expandedGoodsId !== null) {
         const prevRow = document.querySelector(`.spec-detail-row[data-goods-id="${expandedGoodsId}"]`);
         if (prevRow) prevRow.style.display = 'none';
-        const prevBtn = document.querySelector(`.goods-main-row[data-goods-id="${expandedGoodsId}"] .btn-default`);
-        if (prevBtn) prevBtn.textContent = '展开 ▼';
+        const prevBtn = document.querySelector(`.spec-expand-btn[data-goods-id="${expandedGoodsId}"]`);
+        if (prevBtn) prevBtn.textContent = '▼';
     }
     
     // 展开当前
     const detailRow = document.querySelector(`.spec-detail-row[data-goods-id="${goodsId}"]`);
     if (detailRow) {
         detailRow.style.display = 'table-row';
-        if (btnElement) btnElement.textContent = '收起 ▲';
+        // 切换为 ▲
+        if (btnElement) btnElement.textContent = '▲';
         expandedGoodsId = goodsId;
         
         // 加载规格数据
         await loadSpecDetailContent(goodsId);
     }
 }
-
 // ========== 🔥 加载规格详情内容 ==========
 async function loadSpecDetailContent(goodsId) {
     const container = document.getElementById(`specDetailContent_${goodsId}`);
