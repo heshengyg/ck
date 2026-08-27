@@ -1395,13 +1395,31 @@ async function renderStockIn() {
     }
     tb.innerHTML = '';
     let idUsedMap = {};
-if (pageData.length > 0) {
-    const promises = pageData.map(item => checkInUsed(item.id));
-    const results = await Promise.all(promises);
-    pageData.forEach((item, index) => {
-        idUsedMap[item.id] = results[index];
-    });
-}
+    if (pageData.length > 0) {
+        const promises = pageData.map(item => checkInUsed(item.id));
+        const results = await Promise.all(promises);
+        pageData.forEach((item, index) => {
+            idUsedMap[item.id] = results[index];
+        });
+    }
+    
+    // 🔥 收集所有需要查询的 unit_spec_id
+    const specIds = pageData.map(item => item.unit_spec_id).filter(id => id);
+    let specMap = {};
+    if (specIds.length > 0) {
+        try {
+            const specRes = await fetch(`${SUPABASE_URL}/rest/v1/unit_spec?id=in.(${specIds.join(',')})`, {
+                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+            });
+            const specList = await specRes.json() || [];
+            specList.forEach(spec => {
+                specMap[spec.id] = spec;
+            });
+        } catch (e) {
+            console.warn('加载规格名称失败:', e);
+        }
+    }
+    
     let fullHtml = '';
     
     for (let idx = 0; idx < pageData.length; idx++) {
@@ -1424,6 +1442,18 @@ if (pageData.length > 0) {
 
             let amount = formatMoney((item.in_price || 0) * item.in_num);
             let isUsed = idUsedMap[item.id] || false;
+            
+            // ========== 🔥 优化规格显示逻辑 ==========
+            // 如果有 unit_spec_id，从 specMap 中查找规格名称
+            // 否则显示 "-"
+            let specDisplay = '-';
+            if (item.unit_spec_id && specMap[item.unit_spec_id]) {
+                const spec = specMap[item.unit_spec_id];
+                // 获取基础单位名称
+                const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
+                specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+            }
+            
             let btnHtml = '';
             
             if(isUsed){
@@ -1444,7 +1474,7 @@ if (pageData.length > 0) {
         <td>${start + idx + 1}</td>
         <td>${item.supplier || ''}</td>
         <td>${item.goodsName || ''}</td>
-        <td>${item.spec || '-'}</td>
+        <td>${specDisplay}</td>
         <td>${item.settleType || ''}</td>
         <td>${formatMoney(item.in_price)}</td>
         <td>${item.in_num}</td>
@@ -1459,13 +1489,11 @@ if (pageData.length > 0) {
 `;
         } catch (e) {
             console.error('渲染第', idx + 1, '行时出错:', e, pageData[idx]);
-            // 继续渲染下一行
             continue;
         }
     }
     tb.innerHTML = fullHtml;
 }
-
 // 分页渲染
 function renderInPagination() {
     inTotalPages = Math.ceil(filteredStockIn.length / inPageSize) || 1;
