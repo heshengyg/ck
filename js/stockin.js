@@ -374,16 +374,49 @@ function loadInUnitSpecs(goodsId, selectedSpecId, goods) {
             }
         });
         
-        // 🔥 如果传入了选中的规格ID，优先使用
+        // ========== 🔥 核心修改：默认选择逻辑 ==========
+        // 1. 如果传入了选中的规格ID（编辑模式），优先使用
         if (selectedSpecId) {
             select.value = selectedSpecId;
-        } else if (goods && goods.price_spec_id) {
-            // 默认选中价格基准规格
-            select.value = goods.price_spec_id;
+            // 触发规格变更，更新销售单价
+            onInUnitSpecChange();
+            return;
         }
         
-        // 🔥 触发规格变更，更新销售单价
-        onInUnitSpecChange();
+        // 2. 如果没有传入选中ID，判断规格数量
+        const specCount = select.options.length - 1; // 减去"请选择规格"选项
+        
+        if (specCount === 0) {
+            // 没有规格可选
+            select.disabled = true;
+            select.innerHTML = '<option value="">该商品暂无绑定规格</option>';
+            const salePriceInput = document.getElementById('inSalePrice');
+            if (goods) {
+                salePriceInput.value = formatMoney(goods.sale_price);
+                salePriceInput.placeholder = '';
+                salePriceInput.style.color = '';
+            }
+            return;
+        } else if (specCount === 1) {
+            // 🔥 只有1个规格：自动选中，加载价格
+            const firstOption = select.querySelector('option:not([value=""])');
+            if (firstOption) {
+                select.value = firstOption.value;
+                // 触发规格变更，更新销售单价
+                onInUnitSpecChange();
+            }
+        } else {
+            // 🔥 多个规格（>=2）：默认"请选择规格"，不加载价格
+            select.value = '';
+            // 清空销售价格
+            const salePriceInput = document.getElementById('inSalePrice');
+            if (salePriceInput) {
+                salePriceInput.value = '';
+                salePriceInput.placeholder = '请选择入库规格';
+                salePriceInput.style.color = '#999';
+            }
+            // 不触发 onInUnitSpecChange
+        }
     })
     .catch(err => {
         console.warn('加载入库规格失败:', err);
@@ -1384,7 +1417,7 @@ function updateInSortIcon() {
     if(idx>-1) document.querySelectorAll('.inSortIcon')[idx].innerText = inSortAsc?'↑':'↓';
 }
 
-// 渲染入库表格
+// 渲染入库表格 - 速度优化版
 async function renderStockIn() {
     let start = (inCurrentPage - 1) * inPageSize;
     let pageData = filteredStockIn.slice(start, start + inPageSize);
@@ -1394,13 +1427,39 @@ async function renderStockIn() {
         return;
     }
     tb.innerHTML = '';
+    
+    // ========== 🔥 速度优化：批量校验替代逐个校验 ==========
     let idUsedMap = {};
     if (pageData.length > 0) {
-        const promises = pageData.map(item => checkInUsed(item.id));
-        const results = await Promise.all(promises);
-        pageData.forEach((item, index) => {
-            idUsedMap[item.id] = results[index];
-        });
+        const ids = pageData.map(item => item.id);
+        // 批量查询出库记录
+        try {
+            const outRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_out?inRecordId=in.(${ids.join(',')})`, {
+                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+            });
+            const outList = await outRes.json() || [];
+            const outIds = new Set(outList.map(item => item.inRecordId));
+            
+            // 批量查询退货记录
+            const returnRes = await fetch(`${SUPABASE_URL}/rest/v1/return_goods?in_record_id=in.(${ids.join(',')})`, {
+                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+            });
+            const returnList = await returnRes.json() || [];
+            const returnIds = new Set(returnList.map(item => item.in_record_id));
+            
+            // 合并结果
+            pageData.forEach(item => {
+                idUsedMap[item.id] = outIds.has(item.id) || returnIds.has(item.id);
+            });
+        } catch (e) {
+            console.warn('批量校验失败，降级为逐个校验', e);
+            // 降级方案：逐个校验
+            const promises = pageData.map(item => checkInUsed(item.id));
+            const results = await Promise.all(promises);
+            pageData.forEach((item, index) => {
+                idUsedMap[item.id] = results[index];
+            });
+        }
     }
     
     // 🔥 确保 baseUnitList 已加载
