@@ -747,7 +747,7 @@ async function loadLastInPriceAndRemind(goods, specId) {
     // 🔥 如果没有传入规格ID，无法匹配，直接隐藏提醒
     if (!specId) {
         const priceInput = document.getElementById('inPrice');
-        // 如果是编辑模式，保留已有值；否则清空
+        // 如果是新增模式，清空；编辑模式保留已有值
         if (!editId) {
             priceInput.value = '';
         }
@@ -755,20 +755,26 @@ async function loadLastInPriceAndRemind(goods, specId) {
         return;
     }
     
-    const getLastFn = editId ? getLastInPriceExcludeSelf : getLastInPrice;
-    // 🔥 修正参数顺序：supplier, goodsName, editId, specId
-    const lastRecord = await getLastFn(supplier, goodsName, editId, specId);
+    // 🔥 修正：根据是否编辑模式选择函数，传入正确的参数
+    let lastRecord = null;
+    if (editId) {
+        // 编辑模式：排除自身
+        lastRecord = await getLastInPriceExcludeSelf(supplier, goodsName, editId, specId);
+    } else {
+        // 新增模式：不排除
+        lastRecord = await getLastInPrice(supplier, goodsName, specId);
+    }
+    
     const priceInput = document.getElementById('inPrice');
     
     if (lastRecord && lastRecord.price > 0) {
-        // 🔥 只有在非编辑模式，或者编辑模式下当前值为空时，才填充
-        // 如果是编辑模式且已有值，只显示提醒不覆盖
-        if (!editId || !priceInput.value) {
+        // 🔥 新增模式：填充到输入框；编辑模式：只显示提醒不覆盖
+        if (!editId) {
             priceInput.value = lastRecord.price;
         }
         showInPriceReminder(lastRecord.price, lastRecord.recordDate);
     } else {
-        // 如果是编辑模式且已有值，保留；否则清空并显示提示
+        // 新增模式：清空并显示提示；编辑模式：保留已有值
         if (!editId) {
             priceInput.value = '';
         }
@@ -1148,17 +1154,18 @@ if(id){
             let priceInput = document.getElementById('inPrice');
 if (targetGoods.channel === '线上') {
     priceInput.disabled = true;
-    // 🔥 线上商品显示已存储的 in_price（来自 goods_unit_bind.online_cost）
+    // 🔥 线上商品显示已存储的 in_price
     priceInput.value = item.in_price || '';
     hideInPriceReminder();
 } else {
     priceInput.disabled = false;
-    // 线下商品使用 item.in_price
+    // 🔥 线下商品直接回显保存时的 in_price（不覆盖）
     priceInput.value = item.in_price || '';
-    // 🔥 编辑时加载最近入库单价（用于对比提醒）
+    // 🔥 只加载提醒用于对比，不覆盖原有值
     const unitSpecSelect = document.getElementById('inUnitSpec');
     const specId = unitSpecSelect ? unitSpecSelect.value : null;
     if (specId) {
+        // 传入 editId，让 loadLastInPriceAndRemind 知道是编辑模式，不覆盖值
         loadLastInPriceAndRemind(targetGoods, specId);
     }
 }
