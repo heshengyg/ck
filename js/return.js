@@ -1463,6 +1463,7 @@ document.addEventListener('click', function(e) {
 // 全局暴露退货模块所有函数
 window.toggleReturnBatch = toggleReturnBatch;
 window.refreshReturnGoods = refreshReturnGoods;
+window.openReturnAddForm = openReturnAddForm;  // 🔥 添加这行
 window.openReturnAddForm = openReturnAddForm;
 window.closeReturnForm = closeReturnForm;
 window.submitReturnGoods = submitReturnGoods;
