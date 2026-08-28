@@ -263,30 +263,21 @@ function renderReturnList() {
         });
     }
     
-    // 🔥 获取退货记录关联的入库记录
-    const inRecordIds = pageData.map(item => item.in_record_id).filter(id => id);
-    let inRecordMap = {};
-    if (inRecordIds.length > 0) {
-        // 从 allStockIn 中查找
-        allStockIn.forEach(record => {
-            if (inRecordIds.includes(record.id)) {
-                inRecordMap[record.id] = record;
-            }
-        });
-    }
-    
     for (let idx = 0; idx < pageData.length; idx++) {
         const item = pageData[idx];
         const rowNum = start + idx + 1;
         const isChecked = selectedReturnIds.has(item.id);
         
-        // 🔥 获取退货对应的入库规格
+        // 🔥 只修改规格显示逻辑：从入库记录获取 unit_spec_id
         let specDisplay = item.spec || '-';
-        const inRecord = inRecordMap[item.in_record_id];
-        if (inRecord && inRecord.unit_spec_id && unitSpecMap[inRecord.unit_spec_id]) {
-            const spec = unitSpecMap[inRecord.unit_spec_id];
-            const baseItem = baseUnitMap[spec.base_unit_id];
-            specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+        // 从 allStockIn 中查找对应的入库记录
+        if (item.in_record_id) {
+            const inRecord = allStockIn.find(record => record.id === item.in_record_id);
+            if (inRecord && inRecord.unit_spec_id && unitSpecMap[inRecord.unit_spec_id]) {
+                const spec = unitSpecMap[inRecord.unit_spec_id];
+                const baseItem = baseUnitMap[spec.base_unit_id];
+                specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+            }
         }
         
         const html = `
@@ -310,7 +301,8 @@ function renderReturnList() {
         `;
         tb.innerHTML += html;
     }
-    // ========== 底部汇总 ==========
+
+    // ========== 底部汇总（保持不变） ==========
     const groupMap = {};
     filteredReturnGoods.forEach(item => {
         if (!groupMap[item.supplier]) {
@@ -337,35 +329,31 @@ function renderReturnList() {
         tb.innerHTML += summaryHtml;
     }
 
-    // ===== 行复选框事件绑定（直接操作，不通过外部函数） =====
-document.querySelectorAll('.return-item-checkbox').forEach(cb => {
-    cb.onchange = function() {
-        const id = Number(this.dataset.id);
-        if (this.checked) {
-            selectedReturnIds.add(id);
-        } else {
-            selectedReturnIds.delete(id);
-        }
-        // 直接更新全选复选框状态
-        const allCheckbox = document.getElementById('returnPrintAllCheck');
-        if (allCheckbox) {
-            const total = filteredReturnGoods.length;
-            const allChecked = (selectedReturnIds.size === total && total > 0);
-            // 不使用 skipReturnAllChange，直接赋值
-            allCheckbox.checked = allChecked;
-        }
-    };
-});
+    // ===== 行复选框事件绑定 =====
+    document.querySelectorAll('.return-item-checkbox').forEach(cb => {
+        cb.onchange = function() {
+            const id = Number(this.dataset.id);
+            if (this.checked) {
+                selectedReturnIds.add(id);
+            } else {
+                selectedReturnIds.delete(id);
+            }
+            const allCheckbox = document.getElementById('returnPrintAllCheck');
+            if (allCheckbox) {
+                const total = filteredReturnGoods.length;
+                const allChecked = (selectedReturnIds.size === total && total > 0);
+                allCheckbox.checked = allChecked;
+            }
+        };
+    });
 
-// ===== 渲染完成后强制同步全选复选框状态 =====
-const allCheckbox = document.getElementById('returnPrintAllCheck');
-if (allCheckbox) {
-    const total = filteredReturnGoods.length;
-    const allChecked = (selectedReturnIds.size === total && total > 0);
-    allCheckbox.checked = allChecked;
+    const allCheckbox = document.getElementById('returnPrintAllCheck');
+    if (allCheckbox) {
+        const total = filteredReturnGoods.length;
+        const allChecked = (selectedReturnIds.size === total && total > 0);
+        allCheckbox.checked = allChecked;
+    }
 }
-}
-
 // ========== 分页 ==========
 function renderReturnPagination() {
     returnTotalPages = Math.ceil(filteredReturnGoods.length / returnPageSize) || 1;
@@ -779,21 +767,6 @@ function updateReturnBatchList() {
         return;
     }
     window._returnBatchListData = allBatches;
-    
-    // 🔥 构建规格映射（用于显示入库规格名称）
-    const unitSpecMap = {};
-    if (unitSpecList && unitSpecList.length > 0) {
-        unitSpecList.forEach(s => {
-            unitSpecMap[s.id] = s;
-        });
-    }
-    const baseUnitMap = {};
-    if (baseUnitList && baseUnitList.length > 0) {
-        baseUnitList.forEach(b => {
-            baseUnitMap[b.id] = b;
-        });
-    }
-    
     let html = `
         <table style="width:100%;border-collapse:collapse;font-size:13px;">
             <thead>
@@ -811,17 +784,6 @@ function updateReturnBatchList() {
             <tbody>
     `;
     allBatches.forEach((batch, idx) => {
-        // 🔥 获取入库规格显示名称
-        let specDisplay = batch.spec || '-';
-        if (batch.inRecords && batch.inRecords.length > 0) {
-            const inRecord = batch.inRecords[0];
-            if (inRecord.unit_spec_id && unitSpecMap[inRecord.unit_spec_id]) {
-                const spec = unitSpecMap[inRecord.unit_spec_id];
-                const baseItem = baseUnitMap[spec.base_unit_id];
-                specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
-            }
-        }
-        
         const produceDate = batch.produce_date && batch.produce_date !== '-' ? batch.produce_date : '-';
         const expireDate = batch.expire_date && batch.expire_date !== '-' ? batch.expire_date : '-';
         const isSelected = batch.inRecords && batch.inRecords[0] && selectedBatchInRecordId === batch.inRecords[0].id;
@@ -833,7 +795,7 @@ function updateReturnBatchList() {
                 </td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.supplier}</td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.goodsName}</td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${specDisplay}</td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.spec || '-'}</td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:center;">${produceDate}</td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:center;">${expireDate}</td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatMoney(batch.inRecords && batch.inRecords[0] ? batch.inRecords[0].in_price : 0)}</td>
@@ -844,6 +806,7 @@ function updateReturnBatchList() {
     html += '</tbody></table>';
     container.innerHTML = html;
 }
+
 // ========== 切换批次选择 ==========
 function toggleReturnBatch(index) {
     const allBatches = window._returnBatchListData || [];
@@ -877,33 +840,10 @@ function toggleReturnBatch(index) {
         produceDate: batch.produce_date || '',
         expireDate: batch.expire_date || ''
     };
-    
-    // 🔥 获取入库规格显示名称
-    let specDisplay = batch.spec || '-';
-    // 🔥 构建规格映射
-    const unitSpecMap = {};
-    if (unitSpecList && unitSpecList.length > 0) {
-        unitSpecList.forEach(s => {
-            unitSpecMap[s.id] = s;
-        });
-    }
-    const baseUnitMap = {};
-    if (baseUnitList && baseUnitList.length > 0) {
-        baseUnitList.forEach(b => {
-            baseUnitMap[b.id] = b;
-        });
-    }
-    if (inRecord.unit_spec_id && unitSpecMap[inRecord.unit_spec_id]) {
-        const spec = unitSpecMap[inRecord.unit_spec_id];
-        const baseItem = baseUnitMap[spec.base_unit_id];
-        specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
-    }
-    
     document.getElementById('returnSupplierSearch').value = batch.supplier;
     document.getElementById('returnCurGoodsId').value = inRecord.id;
-    document.getElementById('returnSpec').value = specDisplay;  // 🔥 显示入库规格名称
+    document.getElementById('returnSpec').value = batch.spec || '';
     document.getElementById('returnSettleType').value = batch.settleType || '';
-    
     const goodsInfo = allGoods.find(g => g.supplier === batch.supplier && g.name === batch.goodsName);
     if (goodsInfo) {
         let unitCode = "day";
@@ -942,7 +882,7 @@ function toggleReturnBatch(index) {
             <div style="display:flex;gap:20px;flex-wrap:wrap;">
                 <span><strong>供应商：</strong>${batch.supplier}</span>
                 <span><strong>商品：</strong>${batch.goodsName}</span>
-                <span><strong>规格：</strong>${specDisplay}</span>
+                <span><strong>规格：</strong>${batch.spec || '-'}</span>
                 <span><strong>生产日期：</strong>${produceDisplay}</span>
                 <span><strong>到期日期：</strong>${expireDisplay}</span>
                 <span><strong>入库单价：</strong>${formatMoney(selectedBatchData.inPrice)}</span>
@@ -958,6 +898,7 @@ function toggleReturnBatch(index) {
     updateReturnBatchList();
     console.log('✅ 已选择批次:', selectedBatchInRecordId, selectedBatchData);
 }
+
 // ========== 打开退货弹窗 ==========
 function openReturnAddForm() {
     try {
