@@ -249,17 +249,39 @@ function renderReturnList() {
         return;
     }
     
+    // 🔥 构建规格映射
+    const unitSpecMap = {};
+    if (unitSpecList && unitSpecList.length > 0) {
+        unitSpecList.forEach(s => { unitSpecMap[s.id] = s; });
+    }
+    const baseUnitMap = {};
+    if (baseUnitList && baseUnitList.length > 0) {
+        baseUnitList.forEach(b => { baseUnitMap[b.id] = b; });
+    }
+    
     for (let idx = 0; idx < pageData.length; idx++) {
         const item = pageData[idx];
         const rowNum = start + idx + 1;
         const isChecked = selectedReturnIds.has(item.id);
+        
+        // 🔥 只改规格显示：从入库记录获取入库规格名称
+        let specDisplay = '-';
+        if (item.in_record_id) {
+            const inRecord = allStockIn.find(record => record.id === item.in_record_id);
+            if (inRecord && inRecord.unit_spec_id && unitSpecMap[inRecord.unit_spec_id]) {
+                const spec = unitSpecMap[inRecord.unit_spec_id];
+                const baseItem = baseUnitMap[spec.base_unit_id];
+                specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+            }
+        }
+        
         const html = `
             <tr>
                 <td><input type="checkbox" class="return-item-checkbox" value="${item.id}" ${isChecked ? 'checked' : ''} data-id="${item.id}"></td>
                 <td>${rowNum}</td>
                 <td>${item.supplier || ''}</td>
                 <td>${item.goods_name || ''}</td>
-                <td>${item.spec || '-'}</td>
+                <td>${specDisplay}</td>
                 <td>${item.settle_type || ''}</td>
                 <td>${formatMoney(item.in_price)}</td>
                 <td>${item.return_num}</td>
@@ -819,7 +841,18 @@ function toggleReturnBatch(index) {
     };
     document.getElementById('returnSupplierSearch').value = batch.supplier;
     document.getElementById('returnCurGoodsId').value = inRecord.id;
-    document.getElementById('returnSpec').value = batch.spec || '';
+    
+    // ========== 🔥 修改1：规格显示入库规格名称 ==========
+    let specDisplay = '-';
+    if (inRecord.unit_spec_id && unitSpecList) {
+        const spec = unitSpecList.find(s => s.id == inRecord.unit_spec_id);
+        if (spec) {
+            const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
+            specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+        }
+    }
+    document.getElementById('returnSpec').value = specDisplay;
+    
     document.getElementById('returnSettleType').value = batch.settleType || '';
     const goodsInfo = allGoods.find(g => g.supplier === batch.supplier && g.name === batch.goodsName);
     if (goodsInfo) {
@@ -854,12 +887,14 @@ function toggleReturnBatch(index) {
     }
     const produceDisplay = selectedBatchData.produceDate || '-';
     const expireDisplay = selectedBatchData.expireDate || '-';
+    
+    // ========== 🔥 修改2：选中的批次信息中规格也显示入库规格名称 ==========
     document.getElementById('returnSelectedBatchInfo').innerHTML = `
         <div style="background:#f0f9f4;padding:12px;border-radius:4px;border-left:3px solid #52c41a;">
             <div style="display:flex;gap:20px;flex-wrap:wrap;">
                 <span><strong>供应商：</strong>${batch.supplier}</span>
                 <span><strong>商品：</strong>${batch.goodsName}</span>
-                <span><strong>规格：</strong>${batch.spec || '-'}</span>
+                <span><strong>规格：</strong>${specDisplay}</span>
                 <span><strong>生产日期：</strong>${produceDisplay}</span>
                 <span><strong>到期日期：</strong>${expireDisplay}</span>
                 <span><strong>入库单价：</strong>${formatMoney(selectedBatchData.inPrice)}</span>
@@ -875,7 +910,6 @@ function toggleReturnBatch(index) {
     updateReturnBatchList();
     console.log('✅ 已选择批次:', selectedBatchInRecordId, selectedBatchData);
 }
-
 // ========== 打开退货弹窗 ==========
 function openReturnAddForm() {
     try {
@@ -933,11 +967,14 @@ async function submitReturnGoods() {
     if (returnNum < 1) return alert('退货数量必须大于0');
     if (!recordDate) return alert('请选择录入日期');
 
+    // 获取当前批次信息
     const batchList = getStockBatchList(supplier, goodsName);
     let targetBatch = null;
+    let targetInRecord = null;
     for (const batch of batchList) {
         if (batch.inRecords && batch.inRecords.some(r => r.id === selectedBatchInRecordId)) {
             targetBatch = batch;
+            targetInRecord = batch.inRecords.find(r => r.id === selectedBatchInRecordId);
             break;
         }
     }
@@ -946,9 +983,9 @@ async function submitReturnGoods() {
         return;
     }
     if (returnNum > targetBatch.batchRemain) {
-    alert(`退货数量不能大于批次库存（${targetBatch.batchRemain}）`);
-    return;
-}
+        alert(`退货数量不能大于批次库存（${targetBatch.batchRemain}）`);
+        return;
+    }
     const returnAmount = inPrice * returnNum;
     const saleAmount = salePrice * returnNum;
 
@@ -980,11 +1017,40 @@ async function submitReturnGoods() {
             body: JSON.stringify(postData)
         });
         if (res.status >= 200 && res.status < 300) {
+            // ========== 🔥 关键修复：更新入库记录的 in_num ==========
+            if (targetInRecord) {
+                const newInNum = Math.max(0, (targetInRecord.in_num || 0) - returnNum);
+                await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${selectedBatchInRecordId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        apikey: SUPABASE_KEY,
+                        Authorization: `Bearer ${SUPABASE_KEY}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ in_num: newInNum })
+                });
+                console.log(`✅ 入库记录 ${selectedBatchInRecordId} 的 in_num 已更新: ${targetInRecord.in_num} → ${newInNum}`);
+            }
+            
             showMsg('退货成功');
             closeReturnForm();
+            
+            // ========== 🔥 重新加载所有数据 ==========
             await loadReturnGoods();
-            stockDataCache.clear();
+            
+            // 重新加载入库数据
+            const resIn = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?order=id.desc`, {
+                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+            });
+            allStockIn = await resIn.json();
+            
+            // 清空缓存并重建
+            if (stockDataCache) {
+                stockDataCache.clear();
+            }
             refreshAllStockCache(allStockIn, allStockOut);
+            
+            // 刷新库存查看
             if (typeof loadStockStock === 'function') {
                 loadStockStock();
             }
@@ -992,10 +1058,10 @@ async function submitReturnGoods() {
             throw new Error('请求失败');
         }
     } catch (e) {
+        console.error('退货失败:', e);
         showMsg('操作失败');
     }
 }
-
 // ============================================================
 // ===== 删除功能（仅管理员） =====
 // ============================================================
