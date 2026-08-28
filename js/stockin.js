@@ -1206,12 +1206,6 @@ async function submitStockIn(){
             return alert('线下商品必须填写入库单价');
         }
     }
-    if(settleType === '线上'){
-        // 只有【新增单据】才拦截手动填写单价；编辑单据直接跳过校验
-        if(!editId && inPrice !== '' && +inPrice > 0){
-            return alert('线上商品不允许填写入库单价');
-        }
-    }
     if (produceDate && expireDate) {
         return alert('生产日期和到期日期不能同时填写');
     }
