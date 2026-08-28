@@ -816,7 +816,7 @@ function updateReturnBatchList() {
 }
 
 // ========== 切换批次选择 ==========
-function toggleReturnBatch(index) {
+async function toggleReturnBatch(index) {  // 🔥 加上 async
     const allBatches = window._returnBatchListData || [];
     if (index >= allBatches.length) {
         alert('批次数据异常');
@@ -864,62 +864,64 @@ function toggleReturnBatch(index) {
     
     document.getElementById('returnSettleType').value = batch.settleType || '';
     
-    // ========== 🔥 修改2：销售单价从入库规格对应的 sale_price 获取 ==========
+    // ========== 🔥 修改2：销售单价从入库规格对应的 sale_price 获取（使用 async/await） ==========
     const goodsInfo = allGoods.find(g => g.supplier === batch.supplier && g.name === batch.goodsName);
+    let finalPrice = 0;
+    
     if (goodsInfo) {
-        // 从 goods_unit_bind 获取该规格的销售单价
         let specSalePrice = null;
         if (inRecord.unit_spec_id) {
-            fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${goodsInfo.id}&spec_id=eq.${inRecord.unit_spec_id}`, {
-                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-            })
-            .then(res => res.json())
-            .then(bindList => {
+            try {
+                const res = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${goodsInfo.id}&spec_id=eq.${inRecord.unit_spec_id}`, {
+                    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+                });
+                const bindList = await res.json();
                 if (bindList && bindList.length > 0 && bindList[0].sale_price !== null && bindList[0].sale_price !== undefined) {
                     specSalePrice = bindList[0].sale_price;
                 }
-                const basePrice = specSalePrice !== null ? specSalePrice : goodsInfo.sale_price;
-                // 保质期状态价格
-                let unitCode = "day";
-                if (goodsInfo.shelf_life_unit === "年") unitCode = "year";
-                if (goodsInfo.shelf_life_unit === "个月") unitCode = "month";
-                const expireResult = calculateExpireDays(goodsInfo.shelf_life_num, goodsInfo.shelf_life_unit);
-                let warnDay = 0;
-                if (typeof expireResult === 'string' && expireResult.includes('天')) {
-                    warnDay = parseInt(expireResult) || 0;
-                } else if (typeof expireResult === 'number') {
-                    warnDay = expireResult;
-                } else {
-                    warnDay = Number(expireResult) || 0;
-                }
-                const bzResult = calcBzStatus(
-                    batch.produce_date || '',
-                    batch.expire_date || '',
-                    goodsInfo.shelf_life_num || 0,
-                    unitCode,
-                    warnDay
-                );
-                const bzStatus = bzResult.statusText || '正常';
-                (async function() {
-                    let price = await getSalePriceByBzStatus(goodsInfo.id, bzStatus, basePrice);
-                    document.getElementById('returnSalePrice').value = formatMoney(price);
-                    window._returnSelectedPrice = price;
-                })();
-            })
-            .catch(() => {
-                // 获取失败，使用 goods.sale_price
-                document.getElementById('returnSalePrice').value = formatMoney(goodsInfo.sale_price);
-                window._returnSelectedPrice = goodsInfo.sale_price;
-            });
-        } else {
-            // 没有规格，使用 goods.sale_price
-            document.getElementById('returnSalePrice').value = formatMoney(goodsInfo.sale_price);
-            window._returnSelectedPrice = goodsInfo.sale_price;
+            } catch (e) {
+                console.warn('获取规格销售单价失败:', e);
+            }
         }
-    } else {
-        document.getElementById('returnSalePrice').value = '￥0.00';
-        window._returnSelectedPrice = 0;
+        finalPrice = specSalePrice !== null ? specSalePrice : (goodsInfo.sale_price || 0);
     }
+    
+    // 应用保质期状态价格
+    let finalDisplayPrice = finalPrice;
+    if (goodsInfo) {
+        let unitCode = "day";
+        if (goodsInfo.shelf_life_unit === "年") unitCode = "year";
+        if (goodsInfo.shelf_life_unit === "个月") unitCode = "month";
+        const expireResult = calculateExpireDays(goodsInfo.shelf_life_num, goodsInfo.shelf_life_unit);
+        let warnDay = 0;
+        if (typeof expireResult === 'string' && expireResult.includes('天')) {
+            warnDay = parseInt(expireResult) || 0;
+        } else if (typeof expireResult === 'number') {
+            warnDay = expireResult;
+        } else {
+            warnDay = Number(expireResult) || 0;
+        }
+        const bzResult = calcBzStatus(
+            batch.produce_date || '',
+            batch.expire_date || '',
+            goodsInfo.shelf_life_num || 0,
+            unitCode,
+            warnDay
+        );
+        const bzStatus = bzResult.statusText || '正常';
+        try {
+            const price = await getSalePriceByBzStatus(goodsInfo.id, bzStatus, finalPrice);
+            if (price !== null && price !== undefined) {
+                finalDisplayPrice = price;
+            }
+        } catch (e) {
+            console.warn('获取保质期状态价格失败:', e);
+        }
+    }
+    
+    document.getElementById('returnSalePrice').value = formatMoney(finalDisplayPrice);
+    window._returnSelectedPrice = finalDisplayPrice;
+    
     const produceDisplay = selectedBatchData.produceDate || '-';
     const expireDisplay = selectedBatchData.expireDate || '-';
     document.getElementById('returnSelectedBatchInfo').innerHTML = `
