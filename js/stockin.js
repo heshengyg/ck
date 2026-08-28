@@ -1201,11 +1201,26 @@ async function submitStockIn(){
     if(!goodsName || !goodsId) return alert('请选择商品');
     if(!inNum || +inNum < 1) return alert('入库数量必须大于0');
     if(!recordDate) return alert('请选择录入日期');
+    
+    // ========== 🔥 新增：判断入库规格是否必须选择 ==========
+    const unitSpecSelect = document.getElementById('inUnitSpec');
+    if (unitSpecSelect && unitSpecSelect.options.length > 1) {
+        // 有规格选项（大于1说明有"请选择规格" + 至少1个规格）
+        const selectedValue = unitSpecSelect.value;
+        if (!selectedValue || selectedValue === '') {
+            return alert('请选择入库规格');
+        }
+    }
+    
     if(settleType === '线下'){
         if(inPrice === '' || isNaN(+inPrice) || +inPrice < 0){
             return alert('线下商品必须填写入库单价');
         }
     }
+    
+    // ========== 🔥 删除线上商品不允许填写入库单价的校验 ==========
+    // 线上商品的 in_price 已从规格的 online_cost 自动获取，不需要再拦截
+    
     if (produceDate && expireDate) {
         return alert('生产日期和到期日期不能同时填写');
     }
@@ -1214,7 +1229,7 @@ async function submitStockIn(){
     let finalInPrice = 0;
     
     if(settleType === '线上'){
-        // ========== 🔥 核心修改：线上商品从 goods_unit_bind 获取 online_cost ==========
+        // ========== 🔥 线上商品从 goods_unit_bind 获取 online_cost ==========
         if (unitSpecId) {
             // 有规格：从 goods_unit_bind 获取对应规格的 online_cost
             try {
@@ -1257,6 +1272,7 @@ async function submitStockIn(){
         invoice_status: invoiceStatus,
         unit_spec_id: unitSpecId  // 🔥 保存规格ID
     };
+
     try {
         let res;
         const headers = {
@@ -1297,7 +1313,6 @@ async function submitStockIn(){
         showMsg('入库提交失败');
     }
 }
-
 // 下载导入模板
 function downloadStockInTemplate(){
     const header = ["供应商","商品名称","规格","结算方式","销售单价","入库单价","入库数量","录入日期","生产日期","到期日期"];
