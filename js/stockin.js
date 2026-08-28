@@ -1044,52 +1044,58 @@ function onPriceInputChange() {
     const editId = document.getElementById('inEditId').value;
     
     if (supplier && goodsName) {
-        const unitSpecSelect = document.getElementById('inUnitSpec');
-        const unitSpecId = unitSpecSelect ? unitSpecSelect.value : null;
-        
-        // 🔥 没有规格ID，按供应商+商品名匹配
-        if (!unitSpecId) {
-            (async function() {
-                try {
-                    const encodedSupplier = encodeURIComponent(supplier);
-                    const encodedGoodsName = encodeURIComponent(goodsName);
-                    let url = `${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`;
-                    if (editId) url += `&id=neq.${editId}`;
-                    url += `&settleType=eq.线下&order=record_date.desc&limit=1`;
-                    const res = await fetch(url, {
-                        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-                    });
-                    const data = await res.json();
-                    if (data && data.length > 0 && data[0].in_price) {
-                        const lastRecord = {
-                            price: data[0].in_price,
-                            recordDate: data[0].record_date,
-                            inNum: data[0].in_num
-                        };
-                        if (Math.abs(lastRecord.price - currentPrice) < 0.01) {
-                            showPriceConsistentReminder(lastRecord.price, lastRecord.recordDate);
-                        } else {
-                            showPriceChangedReminder(lastRecord.price, currentPrice, lastRecord.recordDate);
-                        }
+    const unitSpecSelect = document.getElementById('inUnitSpec');
+    const unitSpecId = unitSpecSelect ? unitSpecSelect.value : null;
+    
+    // 🔥 没有规格ID，按供应商+商品名匹配
+    if (!unitSpecId) {
+        (async function() {
+            try {
+                const encodedSupplier = encodeURIComponent(supplier);
+                const encodedGoodsName = encodeURIComponent(goodsName);
+                let url = `${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`;
+                if (editId) url += `&id=neq.${editId}`;
+                url += `&settleType=eq.线下&order=record_date.desc&limit=1`;
+                const res = await fetch(url, {
+                    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+                });
+                const data = await res.json();
+                if (data && data.length > 0 && data[0].in_price) {
+                    const lastRecord = {
+                        price: data[0].in_price,
+                        recordDate: data[0].record_date,
+                        inNum: data[0].in_num
+                    };
+                    if (Math.abs(lastRecord.price - currentPrice) < 0.01) {
+                        showPriceConsistentReminder(lastRecord.price, lastRecord.recordDate);
+                    } else {
+                        showPriceChangedReminder(lastRecord.price, currentPrice, lastRecord.recordDate);
                     }
-                } catch (e) {
-                    console.warn('获取最近入库单价失败:', e);
                 }
-            })();
-            return;
-        }
-        
-        const getLastFn = editId ? getLastInPriceExcludeSelf : getLastInPrice;
-        getLastFn(supplier, goodsName, editId, unitSpecId).then(lastRecord => {
-            if (lastRecord && lastRecord.price > 0) {
-                if (Math.abs(lastRecord.price - currentPrice) < 0.01) {
-                    showPriceConsistentReminder(lastRecord.price, lastRecord.recordDate);
-                } else {
-                    showPriceChangedReminder(lastRecord.price, currentPrice, lastRecord.recordDate);
-                }
+            } catch (e) {
+                console.warn('获取最近入库单价失败:', e);
             }
-        });
+        })();
+        return;
     }
+    
+    // 🔥 有规格ID：根据是否编辑选择函数
+    let lastRecordPromise;
+    if (editId) {
+        lastRecordPromise = getLastInPriceExcludeSelf(supplier, goodsName, editId, unitSpecId);
+    } else {
+        lastRecordPromise = getLastInPrice(supplier, goodsName, unitSpecId);
+    }
+    
+    lastRecordPromise.then(lastRecord => {
+        if (lastRecord && lastRecord.price > 0) {
+            if (Math.abs(lastRecord.price - currentPrice) < 0.01) {
+                showPriceConsistentReminder(lastRecord.price, lastRecord.recordDate);
+            } else {
+                showPriceChangedReminder(lastRecord.price, currentPrice, lastRecord.recordDate);
+            }
+        }
+    });
 }
 
 // 打开添加入库弹窗（异步校验）
