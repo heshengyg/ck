@@ -377,7 +377,6 @@ function loadInUnitSpecs(goodsId, selectedSpecId, goods) {
         if (!bindList || bindList.length === 0) {
             select.disabled = true;
             select.innerHTML = '<option value="">该商品暂无绑定规格</option>';
-            // 🔥 没有绑定规格，直接显示 goods.sale_price
             const salePriceInput = document.getElementById('inSalePrice');
             if (goods) {
                 salePriceInput.value = formatMoney(goods.sale_price);
@@ -422,16 +421,14 @@ function loadInUnitSpecs(goodsId, selectedSpecId, goods) {
         // 1. 如果传入了选中的规格ID（编辑模式），优先使用
         if (selectedSpecId) {
             select.value = selectedSpecId;
-            // 触发规格变更，更新销售单价
             onInUnitSpecChange();
             return;
         }
         
         // 2. 如果没有传入选中ID，判断规格数量
-        const specCount = select.options.length - 1; // 减去"请选择规格"选项
+        const specCount = select.options.length - 1;
         
         if (specCount === 0) {
-            // 没有规格可选
             select.disabled = true;
             select.innerHTML = '<option value="">该商品暂无绑定规格</option>';
             const salePriceInput = document.getElementById('inSalePrice');
@@ -442,51 +439,46 @@ function loadInUnitSpecs(goodsId, selectedSpecId, goods) {
             }
             return;
         } else if (specCount === 1) {
-    // 🔥 只有1个规格：自动选中，加载价格
-    const firstOption = select.querySelector('option:not([value=""])');
-    if (firstOption) {
-        select.value = firstOption.value;
-        // 触发规格变更，更新销售单价
-        onInUnitSpecChange();
-        
-        // 🔥 如果是线上商品，自动填充入库单价
-        if (goods && goods.channel === '线上') {
-            const priceInput = document.getElementById('inPrice');
-            const specPriceMap = select._specPriceMap || {};
-            const specPrice = specPriceMap[firstOption.value];
-            if (specPrice && specPrice.online_cost !== null && specPrice.online_cost !== undefined) {
-                priceInput.value = specPrice.online_cost;
-            } else {
-                priceInput.value = goods.online_cost || 0;
+            // 🔥 只有1个规格：自动选中，加载价格
+            const firstOption = select.querySelector('option:not([value=""])');
+            if (firstOption) {
+                select.value = firstOption.value;
+                onInUnitSpecChange();
+                
+                // 🔥 如果是线上商品，自动填充入库单价
+                if (goods && goods.channel === '线上') {
+                    const priceInput = document.getElementById('inPrice');
+                    const specPriceMap = select._specPriceMap || {};
+                    const specPrice = specPriceMap[firstOption.value];
+                    if (specPrice && specPrice.online_cost !== null && specPrice.online_cost !== undefined) {
+                        priceInput.value = specPrice.online_cost;
+                    } else {
+                        priceInput.value = goods.online_cost || 0;
+                    }
+                }
+                
+                // 🔥 如果是线下商品，加载最近入库单价
+                if (goods && goods.channel === '线下') {
+                    setTimeout(() => {
+                        loadLastInPriceAndRemind(goods, firstOption.value);
+                    }, 200);
+                }
             }
-        }
-        
-        /// 🔥 如果是线下商品，加载最近入库单价
-if (goods && goods.channel === '线下') {
-    setTimeout(() => {
-        loadLastInPriceAndRemind(goods, firstOption.value);
-    }, 200);
-}
-    }
-}
- else {
+        } else {
             // 🔥 多个规格（>=2）：默认"请选择规格"，不加载价格
             select.value = '';
-            // 清空销售价格
             const salePriceInput = document.getElementById('inSalePrice');
             if (salePriceInput) {
                 salePriceInput.value = '';
                 salePriceInput.placeholder = '请选择入库规格';
                 salePriceInput.style.color = '#999';
             }
-            // 不触发 onInUnitSpecChange
         }
     })
     .catch(err => {
         console.warn('加载入库规格失败:', err);
         select.disabled = true;
         select.innerHTML = '<option value="">加载失败</option>';
-        // 加载失败时，显示 goods.sale_price
         const salePriceInput = document.getElementById('inSalePrice');
         if (goods) {
             salePriceInput.value = formatMoney(goods.sale_price);
