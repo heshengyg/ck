@@ -324,7 +324,7 @@ function renderReturnList() {
         tb.innerHTML += summaryHtml;
     }
 
-    // ===== 行复选框事件绑定 =====
+    // ===== 行复选框事件绑定（直接操作，不通过外部函数） =====
     document.querySelectorAll('.return-item-checkbox').forEach(cb => {
         cb.onchange = function() {
             const id = Number(this.dataset.id);
@@ -715,9 +715,43 @@ function updateReturnBatchList() {
     if (supplier && goodsName) {
         allBatches = getStockBatchList(supplier, goodsName);
     } else if (supplier) {
-        // ... 省略中间代码（保持不变）...
+        const goodsList = allStockIn
+            .filter(item => item.supplier === supplier)
+            .map(item => item.goodsName);
+        const uniqueGoods = [...new Set(goodsList)];
+        uniqueGoods.forEach(gName => {
+            const batches = getStockBatchList(supplier, gName);
+            batches.forEach(b => {
+                const exists = allBatches.some(existing => 
+                    existing.goodsName === b.goodsName && 
+                    existing.spec === b.spec &&
+                    existing.inRecords && b.inRecords &&
+                    existing.inRecords[0]?.id === b.inRecords[0]?.id
+                );
+                if (!exists) {
+                    allBatches.push(b);
+                }
+            });
+        });
     } else if (goodsName) {
-        // ... 省略中间代码（保持不变）...
+        const supplierList = allStockIn
+            .filter(item => item.goodsName === goodsName)
+            .map(item => item.supplier);
+        const uniqueSuppliers = [...new Set(supplierList)];
+        uniqueSuppliers.forEach(sup => {
+            const batches = getStockBatchList(sup, goodsName);
+            batches.forEach(b => {
+                const exists = allBatches.some(existing => 
+                    existing.goodsName === b.goodsName && 
+                    existing.spec === b.spec &&
+                    existing.inRecords && b.inRecords &&
+                    existing.inRecords[0]?.id === b.inRecords[0]?.id
+                );
+                if (!exists) {
+                    allBatches.push(b);
+                }
+            });
+        });
     }
     if (spec) {
         allBatches = allBatches.filter(b => (b.spec || '') === spec);
@@ -728,17 +762,6 @@ function updateReturnBatchList() {
         return;
     }
     window._returnBatchListData = allBatches;
-    
-    // 🔥 构建规格映射
-    const unitSpecMap = {};
-    if (unitSpecList && unitSpecList.length > 0) {
-        unitSpecList.forEach(s => { unitSpecMap[s.id] = s; });
-    }
-    const baseUnitMap = {};
-    if (baseUnitList && baseUnitList.length > 0) {
-        baseUnitList.forEach(b => { baseUnitMap[b.id] = b; });
-    }
-    
     let html = `
         <table style="width:100%;border-collapse:collapse;font-size:13px;">
             <thead>
@@ -756,39 +779,42 @@ function updateReturnBatchList() {
             <tbody>
     `;
     allBatches.forEach((batch, idx) => {
-        // ========== 🔥 修改：规格显示入库规格名称 ==========
-        let specDisplay = '-';
-        if (batch.inRecords && batch.inRecords.length > 0) {
-            const inRecord = batch.inRecords[0];
-            if (inRecord.unit_spec_id && unitSpecMap[inRecord.unit_spec_id]) {
-                const spec = unitSpecMap[inRecord.unit_spec_id];
-                const baseItem = baseUnitMap[spec.base_unit_id];
+    // ========== 🔥 修改：规格显示入库规格名称 ==========
+    let specDisplay = '-';
+    if (batch.inRecords && batch.inRecords.length > 0) {
+        const inRecord = batch.inRecords[0];
+        if (inRecord.unit_spec_id && unitSpecList) {
+            const spec = unitSpecList.find(s => s.id == inRecord.unit_spec_id);
+            if (spec) {
+                const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
                 specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
             }
         }
-        
-        const produceDate = batch.produce_date && batch.produce_date !== '-' ? batch.produce_date : '-';
-        const expireDate = batch.expire_date && batch.expire_date !== '-' ? batch.expire_date : '-';
-        const isSelected = batch.inRecords && batch.inRecords[0] && selectedBatchInRecordId === batch.inRecords[0].id;
-        const selectBg = isSelected ? 'style="background:#d4edda;"' : '';
-        html += `
-            <tr ${selectBg}>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;">
-                    <input type="radio" name="returnBatchSelect" value="${idx}" ${isSelected ? 'checked' : ''} onclick="toggleReturnBatch(${idx})">
-                </td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.supplier}</td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.goodsName}</td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${specDisplay}</td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${produceDate}</td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${expireDate}</td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatMoney(batch.inRecords && batch.inRecords[0] ? batch.inRecords[0].in_price : 0)}</td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#ff4d4f;">${batch.batchRemain}</td>
-            </tr>
-        `;
-    });
+    }
+    
+    const produceDate = batch.produce_date && batch.produce_date !== '-' ? batch.produce_date : '-';
+    const expireDate = batch.expire_date && batch.expire_date !== '-' ? batch.expire_date : '-';
+    const isSelected = batch.inRecords && batch.inRecords[0] && selectedBatchInRecordId === batch.inRecords[0].id;
+    const selectBg = isSelected ? 'style="background:#d4edda;"' : '';
+    html += `
+        <tr ${selectBg}>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;">
+                <input type="radio" name="returnBatchSelect" value="${idx}" ${isSelected ? 'checked' : ''} onclick="toggleReturnBatch(${idx})">
+            </td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.supplier}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.goodsName}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${specDisplay}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${produceDate}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${expireDate}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatMoney(batch.inRecords && batch.inRecords[0] ? batch.inRecords[0].in_price : 0)}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#ff4d4f;">${batch.batchRemain}</td>
+        </tr>
+    `;
+});
     html += '</tbody></table>';
     container.innerHTML = html;
 }
+
 // ========== 切换批次选择 ==========
 function toggleReturnBatch(index) {
     const allBatches = window._returnBatchListData || [];
@@ -825,7 +851,7 @@ function toggleReturnBatch(index) {
     document.getElementById('returnSupplierSearch').value = batch.supplier;
     document.getElementById('returnCurGoodsId').value = inRecord.id;
     
-    // ========== 🔥 修改：规格显示入库规格名称 ==========
+    // ========== 🔥 修改1：规格显示入库规格名称 ==========
     let specDisplay = '-';
     if (inRecord.unit_spec_id && unitSpecList) {
         const spec = unitSpecList.find(s => s.id == inRecord.unit_spec_id);
@@ -838,49 +864,58 @@ function toggleReturnBatch(index) {
     
     document.getElementById('returnSettleType').value = batch.settleType || '';
     
-    // ========== 🔥 修改：销售单价从入库规格对应的 sale_price 获取 ==========
+    // ========== 🔥 修改2：销售单价从入库规格对应的 sale_price 获取 ==========
     const goodsInfo = allGoods.find(g => g.supplier === batch.supplier && g.name === batch.goodsName);
     if (goodsInfo) {
         // 从 goods_unit_bind 获取该规格的销售单价
         let specSalePrice = null;
         if (inRecord.unit_spec_id) {
-            const bindRes = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${goodsInfo.id}&spec_id=eq.${inRecord.unit_spec_id}`, {
+            fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${goodsInfo.id}&spec_id=eq.${inRecord.unit_spec_id}`, {
                 headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+            })
+            .then(res => res.json())
+            .then(bindList => {
+                if (bindList && bindList.length > 0 && bindList[0].sale_price !== null && bindList[0].sale_price !== undefined) {
+                    specSalePrice = bindList[0].sale_price;
+                }
+                const basePrice = specSalePrice !== null ? specSalePrice : goodsInfo.sale_price;
+                // 保质期状态价格
+                let unitCode = "day";
+                if (goodsInfo.shelf_life_unit === "年") unitCode = "year";
+                if (goodsInfo.shelf_life_unit === "个月") unitCode = "month";
+                const expireResult = calculateExpireDays(goodsInfo.shelf_life_num, goodsInfo.shelf_life_unit);
+                let warnDay = 0;
+                if (typeof expireResult === 'string' && expireResult.includes('天')) {
+                    warnDay = parseInt(expireResult) || 0;
+                } else if (typeof expireResult === 'number') {
+                    warnDay = expireResult;
+                } else {
+                    warnDay = Number(expireResult) || 0;
+                }
+                const bzResult = calcBzStatus(
+                    batch.produce_date || '',
+                    batch.expire_date || '',
+                    goodsInfo.shelf_life_num || 0,
+                    unitCode,
+                    warnDay
+                );
+                const bzStatus = bzResult.statusText || '正常';
+                (async function() {
+                    let price = await getSalePriceByBzStatus(goodsInfo.id, bzStatus, basePrice);
+                    document.getElementById('returnSalePrice').value = formatMoney(price);
+                    window._returnSelectedPrice = price;
+                })();
+            })
+            .catch(() => {
+                // 获取失败，使用 goods.sale_price
+                document.getElementById('returnSalePrice').value = formatMoney(goodsInfo.sale_price);
+                window._returnSelectedPrice = goodsInfo.sale_price;
             });
-            const bindList = await bindRes.json();
-            if (bindList && bindList.length > 0 && bindList[0].sale_price !== null && bindList[0].sale_price !== undefined) {
-                specSalePrice = bindList[0].sale_price;
-            }
-        }
-        // 如果没有规格价格，使用 goods.sale_price
-        const basePrice = specSalePrice !== null ? specSalePrice : goodsInfo.sale_price;
-        
-        // 保质期状态价格
-        let unitCode = "day";
-        if (goodsInfo.shelf_life_unit === "年") unitCode = "year";
-        if (goodsInfo.shelf_life_unit === "个月") unitCode = "month";
-        const expireResult = calculateExpireDays(goodsInfo.shelf_life_num, goodsInfo.shelf_life_unit);
-        let warnDay = 0;
-        if (typeof expireResult === 'string' && expireResult.includes('天')) {
-            warnDay = parseInt(expireResult) || 0;
-        } else if (typeof expireResult === 'number') {
-            warnDay = expireResult;
         } else {
-            warnDay = Number(expireResult) || 0;
+            // 没有规格，使用 goods.sale_price
+            document.getElementById('returnSalePrice').value = formatMoney(goodsInfo.sale_price);
+            window._returnSelectedPrice = goodsInfo.sale_price;
         }
-        const bzResult = calcBzStatus(
-            batch.produce_date || '',
-            batch.expire_date || '',
-            goodsInfo.shelf_life_num || 0,
-            unitCode,
-            warnDay
-        );
-        const bzStatus = bzResult.statusText || '正常';
-        (async function() {
-            let price = await getSalePriceByBzStatus(goodsInfo.id, bzStatus, basePrice);
-            document.getElementById('returnSalePrice').value = formatMoney(price);
-            window._returnSelectedPrice = price;
-        })();
     } else {
         document.getElementById('returnSalePrice').value = '￥0.00';
         window._returnSelectedPrice = 0;
@@ -1012,9 +1047,6 @@ async function submitReturnGoods() {
             body: JSON.stringify(postData)
         });
         if (res.status >= 200 && res.status < 300) {
-            // ========== 🔥 移除更新 in_num 的代码，因为入库数量永远记录原始数量 ==========
-            // 不再修改 stock_in.in_num
-            
             showMsg('退货成功');
             closeReturnForm();
             await loadReturnGoods();
@@ -1489,5 +1521,3 @@ window.onReturnFilterInput = onReturnFilterInput;
 window.showReturnFilterList = showReturnFilterList;
 window.filterReturnFilterList = filterReturnFilterList;
 window.renderReturnFilterList = renderReturnFilterList;
-
-console.log('✅ return.js 已加载，openReturnAddForm 已暴露到 window');
