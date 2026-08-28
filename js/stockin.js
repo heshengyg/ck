@@ -1097,6 +1097,7 @@ function onPriceInputChange() {
         }
     });
 }
+}
 
 // 打开添加入库弹窗（异步校验）
 async function openStockInForm(id=null){
