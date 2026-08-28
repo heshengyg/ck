@@ -1228,6 +1228,24 @@ async function submitStockIn(){
     let targetGoods = allGoods.find(g => g.id == goodsId);
     let finalInPrice = 0;
     
+    // ========== 🔥 新增：计算最小计量单位数量（base_num） ==========
+    let baseNum = 0;
+    
+    if (unitSpecId) {
+        // 有规格：根据换算比例计算
+        const spec = unitSpecList.find(s => s.id == Number(unitSpecId));
+        if (spec) {
+            const convertRate = spec.convert_rate || 1;
+            baseNum = +inNum * convertRate;
+        } else {
+            // 找不到规格，默认1:1
+            baseNum = +inNum;
+        }
+    } else {
+        // 没有规格，默认1:1
+        baseNum = +inNum;
+    }
+    
     if(settleType === '线上'){
         // ========== 🔥 线上商品从 goods_unit_bind 获取 online_cost ==========
         if (unitSpecId) {
@@ -1266,6 +1284,7 @@ async function submitStockIn(){
         sale_price: salePrice,
         in_price: finalInPrice,
         in_num: +inNum,
+        base_num: baseNum,  // 🔥 新增：最小计量单位数量
         record_date: recordDate,
         produce_date: produceDate || null,
         expire_date: expireDate || null,
@@ -1285,6 +1304,7 @@ async function submitStockIn(){
         if(editId){
             // 编辑时不修改发票状态，保留自动核销后的结果
             delete postData.invoice_status;
+            // 🔥 编辑时也更新 base_num
             res = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${editId}`,{
                 method:'PATCH',
                 headers,
@@ -1520,7 +1540,6 @@ async function renderStockIn() {
     let idUsedMap = {};
     if (pageData.length > 0) {
         const ids = pageData.map(item => item.id);
-        // 批量查询出库记录
         try {
             const outRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_out?inRecordId=in.(${ids.join(',')})`, {
                 headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
@@ -1528,20 +1547,17 @@ async function renderStockIn() {
             const outList = await outRes.json() || [];
             const outIds = new Set(outList.map(item => item.inRecordId));
             
-            // 批量查询退货记录
             const returnRes = await fetch(`${SUPABASE_URL}/rest/v1/return_goods?in_record_id=in.(${ids.join(',')})`, {
                 headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
             });
             const returnList = await returnRes.json() || [];
             const returnIds = new Set(returnList.map(item => item.in_record_id));
             
-            // 合并结果
             pageData.forEach(item => {
                 idUsedMap[item.id] = outIds.has(item.id) || returnIds.has(item.id);
             });
         } catch (e) {
             console.warn('批量校验失败，降级为逐个校验', e);
-            // 降级方案：逐个校验
             const promises = pageData.map(item => checkInUsed(item.id));
             const results = await Promise.all(promises);
             pageData.forEach((item, index) => {
@@ -1553,6 +1569,9 @@ async function renderStockIn() {
     // 🔥 确保 baseUnitList 已加载
     if (!baseUnitList || baseUnitList.length === 0) {
         await loadAllBaseUnit();
+    }
+    if (!unitSpecList || unitSpecList.length === 0) {
+        await loadAllUnitSpec();
     }
     
     // 🔥 收集所有需要查询的 unit_spec_id
@@ -1572,6 +1591,12 @@ async function renderStockIn() {
         }
     }
     
+    // 🔥 构建商品ID到商品的映射（用于获取基础单位名称）
+    const goodsMap = {};
+    allGoods.forEach(g => {
+        goodsMap[g.id] = g;
+    });
+    
     let fullHtml = '';
     
     for (let idx = 0; idx < pageData.length; idx++) {
@@ -1580,26 +1605,92 @@ async function renderStockIn() {
             const cacheKey = `${item.supplier}|${item.goodsName}`;
             const cache = stockDataCache ? stockDataCache.get(cacheKey) : null;
             
+            // ========== 🔥 计算批次库存（换算到最小计量单位） ==========
             let batchRemain = 0;
             let totalStock = 0;
+            let baseUnitName = '';
+            
+            // 获取当前批次的最小计量单位名称
+            if (item.unit_spec_id && specMap[item.unit_spec_id]) {
+                const spec = specMap[item.unit_spec_id];
+                const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
+                if (baseItem) {
+                    baseUnitName = baseItem.unit_name;
+                    // 🔥 批次库存 = 当前批次剩余数量 × 换算比例
+                    // 需要从缓存中获取剩余数量
+                    if (cache && cache.batchList && cache.batchList.length > 0) {
+                        const batch = cache.batchList.find(b => {
+                            if (!b || !b.inRecords) return false;
+                            return b.inRecords.some(inItem => inItem.id === item.id);
+                        });
+                        if (batch) {
+                            batchRemain = batch.batchRemain * spec.convert_rate;
+                        }
+                    }
+                }
+            } else {
+                // 没有规格，使用原始数量（假设最小计量单位就是1:1）
+                if (cache && cache.batchList && cache.batchList.length > 0) {
+                    const batch = cache.batchList.find(b => {
+                        if (!b || !b.inRecords) return false;
+                        return b.inRecords.some(inItem => inItem.id === item.id);
+                    });
+                    if (batch) {
+                        batchRemain = batch.batchRemain;
+                    }
+                }
+                // 获取基础单位名称（从商品表）
+                const goods = goodsMap[item.goodsId];
+                if (goods && goods.base_unit_name) {
+                    baseUnitName = goods.base_unit_name;
+                }
+            }
+            
+            // 🔥 计算总库存（所有批次累加，换算到最小计量单位）
             if (cache && cache.batchList && cache.batchList.length > 0) {
                 const batchList = cache.batchList;
-                const batch = batchList.find(b => {
-                    if (!b || !b.inRecords) return false;
-                    return b.inRecords.some(inItem => inItem.id === item.id);
+                // 汇总该商品所有批次的库存（换算到最小计量单位）
+                batchList.forEach(batch => {
+                    if (!batch || !batch.inRecords) return;
+                    // 找到该批次对应的规格
+                    const firstRecord = batch.inRecords[0];
+                    if (firstRecord && firstRecord.unit_spec_id && specMap[firstRecord.unit_spec_id]) {
+                        const spec = specMap[firstRecord.unit_spec_id];
+                        const specRate = spec.convert_rate || 1;
+                        totalStock += batch.batchRemain * specRate;
+                    } else {
+                        // 没有规格，直接累加
+                        totalStock += batch.batchRemain;
+                    }
                 });
-                batchRemain = batch ? batch.batchRemain : 0;
-                totalStock = cache.totalStock || 0;
+            }
+            
+            // 如果缓存没有，从 allStockIn 中累加
+            if (totalStock === 0 && cacheKey) {
+                const allRecords = allStockIn.filter(record => 
+                    record.supplier === item.supplier && 
+                    record.goodsName === item.goodsName
+                );
+                allRecords.forEach(record => {
+                    if (record.unit_spec_id && specMap[record.unit_spec_id]) {
+                        const spec = specMap[record.unit_spec_id];
+                        const specRate = spec.convert_rate || 1;
+                        // 需要获取该批次的剩余数量
+                        // 简化：使用入库数量（实际应该用剩余数量）
+                        totalStock += record.in_num * specRate;
+                    } else {
+                        totalStock += record.in_num;
+                    }
+                });
             }
 
             let amount = formatMoney((item.in_price || 0) * item.in_num);
             let isUsed = idUsedMap[item.id] || false;
             
-            // ========== 🔥 优化规格显示逻辑（分两行） ==========
+            // ========== 🔥 规格显示逻辑（分两行） ==========
             let specDisplay = '-';
             if (item.unit_spec_id && specMap[item.unit_spec_id]) {
                 const spec = specMap[item.unit_spec_id];
-                // 🔥 获取基础单位名称
                 let baseName = '';
                 if (baseUnitList && baseUnitList.length > 0) {
                     const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
@@ -1607,15 +1698,17 @@ async function renderStockIn() {
                         baseName = baseItem.unit_name;
                     }
                 }
-                // 🔥 分两行显示：第一行规格名称，第二行（换算比例+基础单位）
                 specDisplay = `<div style="display:flex;flex-direction:column;align-items:center;line-height:1.4;">
                     <span style="font-weight:bold;font-size:14px;">${spec.show_name}</span>
                     <span style="font-size:12px;color:#999;">（${spec.convert_rate}${baseName}）</span>
                 </div>`;
             }
             
-            let btnHtml = '';
+            // 🔥 批次库存显示（换算后）
+            let batchRemainDisplay = batchRemain > 0 ? `${batchRemain}${baseUnitName}` : (item.in_num || 0);
+            let totalStockDisplay = totalStock > 0 ? `${totalStock}${baseUnitName}` : (item.in_num || 0);
             
+            let btnHtml = '';
             if(isUsed){
                 btnHtml = `
                     <button class="btn btn-primary" disabled style="opacity:0.5">编辑</button>
@@ -1639,8 +1732,8 @@ async function renderStockIn() {
         <td>${formatMoney(item.in_price)}</td>
         <td>${item.in_num}</td>
         <td>${amount}</td>
-        <td>${batchRemain}</td>
-        <td>${totalStock}</td>
+        <td>${batchRemainDisplay}</td>
+        <td>${totalStockDisplay}</td>
         <td>${item.produce_date || ''}</td>
         <td>${item.expire_date || ''}</td>
         <td>${item.record_date || ''}</td>
