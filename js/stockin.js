@@ -281,7 +281,7 @@ function selectInGoods(goods, selectedSpecId, isEditMode){
                         const unitSpecSelect = document.getElementById('inUnitSpec');
                         const specId = unitSpecSelect ? unitSpecSelect.value : null;
                         if (goods.channel === '线下') {
-                            // 线下：加载最近入库单价
+                            // 🔥 线下：加载最近入库单价（传入 specId）
                             loadLastInPriceAndRemind(goods, specId);
                         } else if (goods.channel === '线上') {
                             // 线上：从规格获取 online_cost 填充 in_price
@@ -306,7 +306,7 @@ function selectInGoods(goods, selectedSpecId, isEditMode){
                 const unitSpecSelect = document.getElementById('inUnitSpec');
                 const specId = unitSpecSelect ? unitSpecSelect.value : null;
                 if (goods.channel === '线下') {
-                    // 线下：加载最近入库单价
+                    // 🔥 线下：加载最近入库单价（传入 specId）
                     loadLastInPriceAndRemind(goods, specId);
                 } else if (goods.channel === '线上') {
                     // 线上：从规格获取 online_cost 填充 in_price
@@ -329,11 +329,13 @@ function selectInGoods(goods, selectedSpecId, isEditMode){
     let priceInput = document.getElementById('inPrice');
     if(goods.channel === '线上'){
         priceInput.disabled = true;
-        // 🔥 不在这里清空，等待规格加载完成后填充
         hideInPriceReminder();
     }else{
         priceInput.disabled = false;
-        priceInput.value = '';  // 清空等待加载
+        // 🔥 清空等待加载（编辑模式不覆盖）
+        if (!isEditMode) {
+            priceInput.value = '';
+        }
     }
     updateInPriceByDate();
 }
@@ -690,22 +692,24 @@ async function getLastInPrice(supplier, goodsName, unitSpecId) {
 }
 
 /**
- * 获取最近入库单价（排除自身ID，用于编辑时）
+ * 获取最近入库单价（排除自身ID，用于编辑时）- 按 unit_spec_id 精确匹配
+ * @param {string} supplier - 供应商
+ * @param {string} goodsName - 商品名称
+ * @param {string} excludeId - 排除的入库记录ID
+ * @param {string} unitSpecId - 单位规格ID（必须）
  */
-async function getLastInPriceExcludeSelf(supplier, goodsName, spec, excludeId, unitSpecId) {
+async function getLastInPriceExcludeSelf(supplier, goodsName, excludeId, unitSpecId) {
     try {
-        const encodedSupplier = encodeURIComponent(supplier);
-        const encodedGoodsName = encodeURIComponent(goodsName);
-        const encodedSpec = encodeURIComponent(spec || '');
-        
-        // 🔥 构建查询URL
-        let url = `${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}&spec=eq.${encodedSpec}&id=neq.${excludeId}`;
-        
-        // 🔥 如果有单位规格ID，按单位规格精确匹配
-        if (unitSpecId) {
-            url += `&unit_spec_id=eq.${unitSpecId}`;
+        if (!unitSpecId) {
+            console.warn('getLastInPriceExcludeSelf: 未传入 unitSpecId，无法匹配');
+            return null;
         }
         
+        const encodedSupplier = encodeURIComponent(supplier);
+        const encodedGoodsName = encodeURIComponent(goodsName);
+        
+        // 🔥 按 unit_spec_id 精确匹配，排除自身
+        let url = `${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}&unit_spec_id=eq.${unitSpecId}&id=neq.${excludeId}`;
         url += `&order=record_date.desc&limit=1`;
         
         const res = await fetch(url, {
@@ -743,21 +747,31 @@ async function loadLastInPriceAndRemind(goods, specId) {
     // 🔥 如果没有传入规格ID，无法匹配，直接隐藏提醒
     if (!specId) {
         const priceInput = document.getElementById('inPrice');
-        priceInput.value = '';
+        // 如果是编辑模式，保留已有值；否则清空
+        if (!editId) {
+            priceInput.value = '';
+        }
         showNoHistoryReminder();
         return;
     }
     
     const getLastFn = editId ? getLastInPriceExcludeSelf : getLastInPrice;
-    // 🔥 传入 unitSpecId 进行精确匹配
+    // 🔥 修正参数顺序：supplier, goodsName, editId, specId
     const lastRecord = await getLastFn(supplier, goodsName, editId, specId);
     const priceInput = document.getElementById('inPrice');
     
     if (lastRecord && lastRecord.price > 0) {
-        priceInput.value = lastRecord.price;
+        // 🔥 只有在非编辑模式，或者编辑模式下当前值为空时，才填充
+        // 如果是编辑模式且已有值，只显示提醒不覆盖
+        if (!editId || !priceInput.value) {
+            priceInput.value = lastRecord.price;
+        }
         showInPriceReminder(lastRecord.price, lastRecord.recordDate);
     } else {
-        priceInput.value = '';
+        // 如果是编辑模式且已有值，保留；否则清空并显示提示
+        if (!editId) {
+            priceInput.value = '';
+        }
         showNoHistoryReminder();
     }
 }
@@ -1132,31 +1146,22 @@ if(id){
             
             // 根据结算方式控制入库单价
             let priceInput = document.getElementById('inPrice');
-if(targetGoods.channel === '线上'){
+if (targetGoods.channel === '线上') {
     priceInput.disabled = true;
     // 🔥 线上商品显示已存储的 in_price（来自 goods_unit_bind.online_cost）
     priceInput.value = item.in_price || '';
     hideInPriceReminder();
-}else{
+} else {
     priceInput.disabled = false;
     // 线下商品使用 item.in_price
     priceInput.value = item.in_price || '';
-                // 编辑时对比价格提醒
-                if (item.in_price) {
-                    const unitSpecId = item.unit_spec_id || null;
-                    getLastInPriceExcludeSelf(item.supplier, item.goodsName, item.id, unitSpecId).then(lastRecord => {
-                        if (lastRecord && lastRecord.price > 0) {
-                            if (Math.abs(lastRecord.price - parseFloat(item.in_price)) < 0.01) {
-                                showPriceConsistentReminder(lastRecord.price, lastRecord.recordDate);
-                            } else {
-                                showPriceChangedReminder(lastRecord.price, parseFloat(item.in_price), lastRecord.recordDate);
-                            }
-                        } else {
-                            showNoHistoryReminder();
-                        }
-                    });
-                }
-            }
+    // 🔥 编辑时加载最近入库单价（用于对比提醒）
+    const unitSpecSelect = document.getElementById('inUnitSpec');
+    const specId = unitSpecSelect ? unitSpecSelect.value : null;
+    if (specId) {
+        loadLastInPriceAndRemind(targetGoods, specId);
+    }
+}
             
             // ✅ 更新销售单价（根据日期状态）
             setTimeout(() => {
