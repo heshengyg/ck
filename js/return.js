@@ -1030,7 +1030,7 @@ async function submitReturnGoods() {
         return_reason: returnReason || null
     };
 
-    try {
+   try {
         const headers = {
             apikey: SUPABASE_KEY,
             Authorization: `Bearer ${SUPABASE_KEY}`,
@@ -1061,16 +1061,21 @@ async function submitReturnGoods() {
             showMsg('退货成功');
             closeReturnForm();
             
-            // ========== 🔥 关键：重新加载所有相关数据，确保缓存刷新 ==========
+            // ========== 🔥 重新加载所有数据，刷新缓存 ==========
             await loadReturnGoods();
+            
             // 重新加载入库数据
             const resIn = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?order=id.desc`, {
                 headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
             });
             allStockIn = await resIn.json();
-            // 清空缓存
-            stockDataCache.clear();
+            
+            // 🔥 强制清空并重建缓存
+            if (stockDataCache) {
+                stockDataCache.clear();
+            }
             refreshAllStockCache(allStockIn, allStockOut);
+            
             if (typeof loadStockStock === 'function') {
                 loadStockStock();
             }

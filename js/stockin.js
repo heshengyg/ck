@@ -1459,7 +1459,7 @@ async function importStockInExcel() {
     reader.readAsArrayBuffer(file);
 }
 
-// 加载入库列表【完全保留你原有代码，未新增任何全局缓存、不改动逻辑】
+// 加载入库列表
 async function loadStockIn() {
     await preLoadStockOutData();
     try {
@@ -1468,10 +1468,13 @@ async function loadStockIn() {
         });
         const allData = await fetchAll.json();
         allStockIn = allData;
-       initInFilterData();
+        initInFilterData();
         document.getElementById('inTotalCount').textContent = allData.length;
         
-        // ✅ 确保缓存刷新
+        // ========== 🔥 关键修复：强制清空并重建缓存 ==========
+        if (stockDataCache) {
+            stockDataCache.clear();
+        }
         refreshAllStockCache(allStockIn, allStockOut);
         
         inCurrentPage = 1;
