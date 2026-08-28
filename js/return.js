@@ -264,7 +264,7 @@ function renderReturnList() {
         const rowNum = start + idx + 1;
         const isChecked = selectedReturnIds.has(item.id);
         
-        // ========== 🔥 修复2：规格显示入库规格名称 ==========
+        // 🔥 规格显示入库规格名称
         let specDisplay = '-';
         if (item.in_record_id) {
             const inRecord = allStockIn.find(record => record.id === item.in_record_id);
@@ -272,6 +272,18 @@ function renderReturnList() {
                 const spec = unitSpecMap[inRecord.unit_spec_id];
                 const baseItem = baseUnitMap[spec.base_unit_id];
                 specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+            }
+        }
+        
+        // 🔥 获取该批次当前的剩余库存
+        let currentBatchRemain = 0;
+        if (item.in_record_id) {
+            const batchList = getStockBatchList(item.supplier, item.goods_name);
+            for (const batch of batchList) {
+                if (batch.inRecords && batch.inRecords.some(r => r.id === item.in_record_id)) {
+                    currentBatchRemain = batch.batchRemain;
+                    break;
+                }
             }
         }
         
@@ -284,7 +296,7 @@ function renderReturnList() {
                 <td>${specDisplay}</td>
                 <td>${item.settle_type || ''}</td>
                 <td>${formatMoney(item.in_price)}</td>
-                <td>${item.return_num}</td>
+                <td>${currentBatchRemain}</td>
                 <td>${formatMoney(item.return_amount)}</td>
                 <td>${formatMoney(item.sale_price)}</td>
                 <td>${formatMoney(item.sale_amount)}</td>
@@ -762,6 +774,17 @@ function updateReturnBatchList() {
         return;
     }
     window._returnBatchListData = allBatches;
+    
+    // 🔥 构建规格映射
+    const unitSpecMap = {};
+    if (unitSpecList && unitSpecList.length > 0) {
+        unitSpecList.forEach(s => { unitSpecMap[s.id] = s; });
+    }
+    const baseUnitMap = {};
+    if (baseUnitList && baseUnitList.length > 0) {
+        baseUnitList.forEach(b => { baseUnitMap[b.id] = b; });
+    }
+    
     let html = `
         <table style="width:100%;border-collapse:collapse;font-size:13px;">
             <thead>
@@ -779,6 +802,17 @@ function updateReturnBatchList() {
             <tbody>
     `;
     allBatches.forEach((batch, idx) => {
+        // 🔥 规格显示入库规格名称
+        let specDisplay = '-';
+        if (batch.inRecords && batch.inRecords.length > 0) {
+            const inRecord = batch.inRecords[0];
+            if (inRecord.unit_spec_id && unitSpecMap[inRecord.unit_spec_id]) {
+                const spec = unitSpecMap[inRecord.unit_spec_id];
+                const baseItem = baseUnitMap[spec.base_unit_id];
+                specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+            }
+        }
+        
         const produceDate = batch.produce_date && batch.produce_date !== '-' ? batch.produce_date : '-';
         const expireDate = batch.expire_date && batch.expire_date !== '-' ? batch.expire_date : '-';
         const isSelected = batch.inRecords && batch.inRecords[0] && selectedBatchInRecordId === batch.inRecords[0].id;
@@ -790,7 +824,7 @@ function updateReturnBatchList() {
                 </td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.supplier}</td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.goodsName}</td>
-                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.spec || '-'}</td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${specDisplay}</td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:center;">${produceDate}</td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:center;">${expireDate}</td>
                 <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatMoney(batch.inRecords && batch.inRecords[0] ? batch.inRecords[0].in_price : 0)}</td>
@@ -801,7 +835,6 @@ function updateReturnBatchList() {
     html += '</tbody></table>';
     container.innerHTML = html;
 }
-
 // ========== 切换批次选择 ==========
 function toggleReturnBatch(index) {
     const allBatches = window._returnBatchListData || [];
@@ -838,7 +871,7 @@ function toggleReturnBatch(index) {
     document.getElementById('returnSupplierSearch').value = batch.supplier;
     document.getElementById('returnCurGoodsId').value = inRecord.id;
     
-    // ========== 🔥 修复1：规格显示入库规格名称 ==========
+    // ========== 🔥 规格显示入库规格名称 ==========
     let specDisplay = '-';
     if (inRecord.unit_spec_id && unitSpecList) {
         const spec = unitSpecList.find(s => s.id == inRecord.unit_spec_id);
@@ -1010,7 +1043,7 @@ async function submitReturnGoods() {
             body: JSON.stringify(postData)
         });
         if (res.status >= 200 && res.status < 300) {
-            // ========== 🔥 修复3：更新入库记录的 in_num ==========
+            // ========== 🔥 更新入库记录的 in_num ==========
             if (targetInRecord) {
                 const newInNum = Math.max(0, (targetInRecord.in_num || 0) - returnNum);
                 await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${selectedBatchInRecordId}`, {
@@ -1027,7 +1060,15 @@ async function submitReturnGoods() {
             
             showMsg('退货成功');
             closeReturnForm();
+            
+            // ========== 🔥 关键：重新加载所有相关数据，确保缓存刷新 ==========
             await loadReturnGoods();
+            // 重新加载入库数据
+            const resIn = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?order=id.desc`, {
+                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+            });
+            allStockIn = await resIn.json();
+            // 清空缓存
             stockDataCache.clear();
             refreshAllStockCache(allStockIn, allStockOut);
             if (typeof loadStockStock === 'function') {
