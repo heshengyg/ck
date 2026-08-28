@@ -252,15 +252,11 @@ function renderReturnList() {
     // 🔥 构建规格映射（用于显示入库规格名称）
     const unitSpecMap = {};
     if (unitSpecList && unitSpecList.length > 0) {
-        unitSpecList.forEach(s => {
-            unitSpecMap[s.id] = s;
-        });
+        unitSpecList.forEach(s => { unitSpecMap[s.id] = s; });
     }
     const baseUnitMap = {};
     if (baseUnitList && baseUnitList.length > 0) {
-        baseUnitList.forEach(b => {
-            baseUnitMap[b.id] = b;
-        });
+        baseUnitList.forEach(b => { baseUnitMap[b.id] = b; });
     }
     
     for (let idx = 0; idx < pageData.length; idx++) {
@@ -268,15 +264,26 @@ function renderReturnList() {
         const rowNum = start + idx + 1;
         const isChecked = selectedReturnIds.has(item.id);
         
-        // 🔥 只修改规格显示逻辑：从入库记录获取 unit_spec_id
+        // 🔥 获取入库规格显示
         let specDisplay = item.spec || '-';
-        // 从 allStockIn 中查找对应的入库记录
         if (item.in_record_id) {
             const inRecord = allStockIn.find(record => record.id === item.in_record_id);
             if (inRecord && inRecord.unit_spec_id && unitSpecMap[inRecord.unit_spec_id]) {
                 const spec = unitSpecMap[inRecord.unit_spec_id];
                 const baseItem = baseUnitMap[spec.base_unit_id];
                 specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+            }
+        }
+        
+        // ========== 🔥 获取该批次当前的剩余库存（包含出库+退货扣减） ==========
+        let currentBatchRemain = 0;
+        if (item.in_record_id) {
+            const batchList = getStockBatchList(item.supplier, item.goods_name);
+            for (const batch of batchList) {
+                if (batch.inRecords && batch.inRecords.some(r => r.id === item.in_record_id)) {
+                    currentBatchRemain = batch.batchRemain;
+                    break;
+                }
             }
         }
         
@@ -289,7 +296,7 @@ function renderReturnList() {
                 <td>${specDisplay}</td>
                 <td>${item.settle_type || ''}</td>
                 <td>${formatMoney(item.in_price)}</td>
-                <td>${item.return_num}</td>
+                <td>${currentBatchRemain}</td>  <!-- 🔥 显示当前剩余库存，而不是原始入库数量 -->
                 <td>${formatMoney(item.return_amount)}</td>
                 <td>${formatMoney(item.sale_price)}</td>
                 <td>${formatMoney(item.sale_amount)}</td>
