@@ -13,7 +13,47 @@ let outFilterData = {
 function refreshStockOut(){
     loadStockOut();
 }
+// ========== 加载商品规格绑定数据 ==========
+async function loadGoodsUnitBind() {
+    try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?select=*`, {
+            headers: {
+                apikey: SUPABASE_KEY,
+                Authorization: `Bearer ${SUPABASE_KEY}`
+            }
+        });
+        if (!response.ok) throw new Error('加载商品规格绑定失败');
+        const data = await response.json();
+        window.allGoodsUnitBind = data;
+        console.log('商品规格绑定加载完成:', data.length);
+        return data;
+    } catch (e) {
+        console.error('加载商品规格绑定失败：', e);
+        window.allGoodsUnitBind = [];
+        return [];
+    }
+}
 
+// ========== 加载规格单位数据 ==========
+async function loadUnitSpecs() {
+    try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/unit_spec?select=*`, {
+            headers: {
+                apikey: SUPABASE_KEY,
+                Authorization: `Bearer ${SUPABASE_KEY}`
+            }
+        });
+        if (!response.ok) throw new Error('加载规格单位失败');
+        const data = await response.json();
+        window.allUnitSpecs = data;
+        console.log('规格单位加载完成:', data.length);
+        return data;
+    } catch (e) {
+        console.error('加载规格单位失败：', e);
+        window.allUnitSpecs = [];
+        return [];
+    }
+}
 // ========== 出库筛选下拉 ==========
 function initOutFilterData() {
     if (!allStockOut || allStockOut.length === 0) return;
@@ -199,7 +239,7 @@ function renderOutGoodsList(list){
 }
 
 // 选择商品，自动带出字段 + 加载总库存
-function selectOutGoods(goods){
+async function selectOutGoods(goods){
     let sup = document.getElementById('outSupSearchInput').value;
     document.getElementById('outGoodsSearchInput').value = goods.name;
     document.getElementById('outSpec').value = goods.spec || '';
@@ -213,78 +253,130 @@ function selectOutGoods(goods){
     
     // 获取商品信息
     const goodsItem = allGoods.find(g => g.supplier === sup && g.name === goods.name);
-    if (goodsItem && goodsItem.conversion_specs) {
-        // 解析换算规格
-        let specs = [];
-        if (typeof goodsItem.conversion_specs === 'string') {
-            try {
-                specs = JSON.parse(goodsItem.conversion_specs);
-            } catch (e) {
-                specs = [];
+    if (goodsItem) {
+        try {
+            // ========== 从 goods_unit_bind 表获取商品规格绑定 ==========
+            // 先加载数据
+            if (!window.allGoodsUnitBind || window.allGoodsUnitBind.length === 0) {
+                await loadGoodsUnitBind();
             }
-        } else if (Array.isArray(goodsItem.conversion_specs)) {
-            specs = goodsItem.conversion_specs;
-        }
-        
-        // 构建下拉选项
-        specs.forEach((spec, index) => {
-            const displayName = spec.spec_name || spec.unit || `规格${index + 1}`;
-            const option = document.createElement('option');
-            option.value = displayName;
-            const rateText = spec.conversion_rate || 1;
-            const unitText = goodsItem.base_unit || '个';
-            option.textContent = `${displayName}（1${spec.unit || ''}=${rateText}${unitText}）`;
-            specSelect.appendChild(option);
+            if (!window.allUnitSpecs || window.allUnitSpecs.length === 0) {
+                await loadUnitSpecs();
+            }
             
-            outCurrSpecOptions.push({
-                display: displayName,
-                originalSpec: goods.spec || '',
-                unit: spec.unit || goodsItem.base_unit || '个',
-                conversion_rate: spec.conversion_rate || 1,
-                specId: spec.spec_id || spec.id || goodsItem.id,
-                specName: spec.spec_name || ''
+            // 查找该商品的所有规格绑定
+            const bindSpecs = window.allGoodsUnitBind.filter(bind => 
+                bind.goods_id === goodsItem.id
+            );
+            
+            console.log('商品规格绑定:', bindSpecs);
+            
+            // 构建下拉选项
+            bindSpecs.forEach((bind, index) => {
+                // 获取规格信息
+                const specItem = window.allUnitSpecs?.find(s => s.id === bind.spec_id);
+                const specName = specItem?.show_name || `规格${index + 1}`;
+                const baseUnit = goodsItem.base_unit || '个';
+                const conversionRate = specItem?.convert_rate || 1;
+                
+                const option = document.createElement('option');
+                option.value = bind.spec_id;  // 使用 spec_id 作为值
+                option.textContent = `${specName}（1${specName}=${conversionRate}${baseUnit}）`;
+                option.dataset.specId = bind.spec_id;
+                option.dataset.conversionRate = conversionRate;
+                option.dataset.baseUnit = baseUnit;
+                option.dataset.specName = specName;
+                specSelect.appendChild(option);
+                
+                outCurrSpecOptions.push({
+                    specId: bind.spec_id,
+                    display: specName,
+                    originalSpec: goods.spec || '',
+                    unit: specName,
+                    baseUnit: baseUnit,
+                    conversion_rate: conversionRate,
+                    specName: specName,
+                    goodsId: goodsItem.id,
+                    bindId: bind.id
+                });
             });
-        });
-    }
-    
-    // 如果没有换算规格，添加默认选项
-    if (outCurrSpecOptions.length === 0) {
+            
+            // 如果没有换算规格，添加默认选项
+            if (bindSpecs.length === 0) {
+                const defaultSpec = {
+                    specId: 0,
+                    display: goods.spec || '默认规格',
+                    originalSpec: goods.spec || '',
+                    unit: goodsItem.base_unit || '个',
+                    baseUnit: goodsItem.base_unit || '个',
+                    conversion_rate: 1,
+                    specName: '默认',
+                    goodsId: goodsItem.id,
+                    bindId: 0
+                };
+                outCurrSpecOptions.push(defaultSpec);
+                const option = document.createElement('option');
+                option.value = '0';
+                option.textContent = defaultSpec.display;
+                specSelect.appendChild(option);
+            }
+        } catch (e) {
+            console.error('加载换算规格失败：', e);
+            // 降级：使用默认规格
+            const defaultSpec = {
+                specId: 0,
+                display: goods.spec || '默认规格',
+                originalSpec: goods.spec || '',
+                unit: goodsItem?.base_unit || '个',
+                baseUnit: goodsItem?.base_unit || '个',
+                conversion_rate: 1,
+                specName: '默认',
+                goodsId: goodsItem?.id || 0,
+                bindId: 0
+            };
+            outCurrSpecOptions.push(defaultSpec);
+            const option = document.createElement('option');
+            option.value = '0';
+            option.textContent = defaultSpec.display;
+            specSelect.appendChild(option);
+        }
+    } else {
+        // 没有商品信息，添加默认选项
         const defaultSpec = {
+            specId: 0,
             display: goods.spec || '默认规格',
             originalSpec: goods.spec || '',
-            unit: goodsItem?.base_unit || '个',
+            unit: '个',
+            baseUnit: '个',
             conversion_rate: 1,
-            specId: goodsItem?.id || 0,
-            specName: '默认'
+            specName: '默认',
+            goodsId: 0,
+            bindId: 0
         };
         outCurrSpecOptions.push(defaultSpec);
         const option = document.createElement('option');
-        option.value = defaultSpec.display;
+        option.value = '0';
         option.textContent = defaultSpec.display;
         specSelect.appendChild(option);
     }
     
     // 默认选中第一个
     if (outCurrSpecOptions.length > 0) {
-        specSelect.value = outCurrSpecOptions[0].display;
+        specSelect.value = outCurrSpecOptions[0].specId;
         outSelectedSpecData = outCurrSpecOptions[0];
         document.getElementById('outSpec').value = outCurrSpecOptions[0].originalSpec || '';
         
-        // 新增：更新总库存和销售价格
+        // 更新总库存和销售价格
         updateTotalStockDisplay();
         updateSalePrice();
     }
-
-    // 原有的价格逻辑（保留，但会在updateSalePrice中覆盖）
-    const total = getTotalStockNum(sup, goods.name);
-    // 注意：这里不再直接设置totalStockNum，由updateTotalStockDisplay处理
 }
-// ========== 新增：换算规格变更处理 ==========
+// ========== 换算规格变更处理 ==========
 function onOutSpecChange() {
     const select = document.getElementById('outSpecSelect');
-    const selectedValue = select.value;
+    const selectedValue = parseInt(select.value);  // spec_id
     
-    if (!selectedValue) {
+    if (!selectedValue && selectedValue !== 0) {
         document.getElementById('outSpec').value = '';
         document.getElementById('outSalePrice').value = '';
         document.getElementById('outSalePrice').placeholder = '请选择换算规格';
@@ -294,7 +386,7 @@ function onOutSpecChange() {
     }
     
     // 解析选中的规格数据
-    const specData = outCurrSpecOptions.find(item => item.display === selectedValue);
+    const specData = outCurrSpecOptions.find(item => item.specId === selectedValue);
     if (specData) {
         outSelectedSpecData = specData;
         document.getElementById('outSpec').value = specData.originalSpec || '';
@@ -306,7 +398,7 @@ function onOutSpecChange() {
         updateSalePrice();
     }
 }
-// ========== 新增：更新总库存显示（按换算规格） ==========
+// ========== 更新总库存显示（按换算规格） ==========
 function updateTotalStockDisplay() {
     const supplier = document.getElementById('outSupSearchInput').value.trim();
     const goodsName = document.getElementById('outGoodsSearchInput').value.trim();
@@ -332,7 +424,7 @@ function updateTotalStockDisplay() {
     
     // 获取换算比例
     const baseUnit = goodsItem.base_unit || '个';
-    const specUnit = specData.unit || '';
+    const specUnit = specData.specName || specData.unit || '个';
     const conversionRate = specData.conversion_rate || 1;
     
     // 计算换算后的数量
@@ -357,7 +449,7 @@ function updateTotalStockDisplay() {
     window._outBaseUnitStockQty = totalBaseUnit;
     window._outConversionRate = conversionRate;
 }
-// ========== 新增：更新销售价格 ==========
+// ========== 更新销售价格 ==========
 async function updateSalePrice() {
     const supplier = document.getElementById('outSupSearchInput').value.trim();
     const goodsName = document.getElementById('outGoodsSearchInput').value.trim();
@@ -420,9 +512,9 @@ async function updateSalePrice() {
     const bzStatus = bzResult.statusText || '正常';
     window._outSelectedBzStatus = bzStatus;
     
-    // 获取价格
+    // 获取价格 - 使用 specData.specId
     try {
-        const specId = specData.specId || goodsItem.id;
+        const specId = specData.specId || 0;
         let price = await getSalePriceByBzStatusAndSpec(goodsItem.id, specId, bzStatus);
         
         if (price === null || price === undefined || price === 0) {
@@ -444,17 +536,21 @@ async function updateSalePrice() {
         window._outSelectedSalePrice = null;
     }
 }
-// ========== 新增：根据规格获取价格 ==========
+// ========== 根据规格获取价格 ==========
 async function getSalePriceByBzStatusAndSpec(goodsId, specId, bzStatus) {
     try {
-        // 构建查询
+        // 构建查询：按 goods_id + spec_id 查询
         let query = `${SUPABASE_URL}/rest/v1/price_temp_state?goods_id=eq.${goodsId}&select=*`;
         
-        // 如果有规格ID，添加规格条件
-        if (specId && specId !== goodsId) {
+        // 如果有规格ID且不为0，添加规格条件
+        if (specId && specId > 0) {
             query += `&spec_id=eq.${specId}`;
+        } else {
+            // 如果没有规格ID，查询默认规格 (spec_id=0)
+            query += `&spec_id=eq.0`;
         }
         
+        console.log('查询价格:', query);
         const response = await fetch(query, {
             headers: {
                 apikey: SUPABASE_KEY,
@@ -469,39 +565,58 @@ async function getSalePriceByBzStatusAndSpec(goodsId, specId, bzStatus) {
         
         const data = await response.json();
         if (!data || data.length === 0) {
-            return null;
-        }
-        
-        const priceRecord = data[0];
-        
-        // 根据状态返回对应的价格
-        if (bzStatus === '正常') {
-            return priceRecord.sale_price || priceRecord.price || null;
-        } else if (bzStatus === '过期') {
-            return priceRecord.expire_price || null;
-        } else if (bzStatus.startsWith('discount_')) {
-            const match = bzStatus.match(/discount_(\d+)/);
-            if (match) {
-                const idx = parseInt(match[1]);
-                const fieldMap = {
-                    1: 'discount_1_price',
-                    2: 'discount_2_price',
-                    3: 'discount_3_price',
-                    4: 'discount_4_price'
-                };
-                const field = fieldMap[idx];
-                if (field && priceRecord[field] !== undefined && priceRecord[field] !== null) {
-                    return priceRecord[field];
+            // 如果没有找到该规格的价格，尝试查找该商品的默认价格（spec_id=0）
+            if (specId > 0) {
+                const fallbackQuery = `${SUPABASE_URL}/rest/v1/price_temp_state?goods_id=eq.${goodsId}&spec_id=eq.0&select=*`;
+                const fallbackResponse = await fetch(fallbackQuery, {
+                    headers: {
+                        apikey: SUPABASE_KEY,
+                        Authorization: `Bearer ${SUPABASE_KEY}`
+                    }
+                });
+                if (fallbackResponse.ok) {
+                    const fallbackData = await fallbackResponse.json();
+                    if (fallbackData && fallbackData.length > 0) {
+                        return getPriceFromRecord(fallbackData[0], bzStatus);
+                    }
                 }
             }
             return null;
         }
         
-        return priceRecord.sale_price || priceRecord.price || null;
+        const priceRecord = data[0];
+        return getPriceFromRecord(priceRecord, bzStatus);
     } catch (e) {
         console.error('获取价格异常：', e);
         return null;
     }
+}
+
+// ========== 辅助：从价格记录中提取价格 ==========
+function getPriceFromRecord(priceRecord, bzStatus) {
+    // 根据状态返回对应的价格
+    if (bzStatus === '正常') {
+        return priceRecord.sale_price || null;
+    } else if (bzStatus === '过期') {
+        return priceRecord.expire_price || null;
+    } else if (bzStatus.startsWith('discount_')) {
+        const match = bzStatus.match(/discount_(\d+)/);
+        if (match) {
+            const idx = parseInt(match[1]);
+            const fieldMap = {
+                1: 'discount_1_price',
+                2: 'discount_2_price',
+                3: 'discount_3_price',
+                4: 'discount_4_price'
+            };
+            const field = fieldMap[idx];
+            if (field && priceRecord[field] !== undefined && priceRecord[field] !== null) {
+                return priceRecord[field];
+            }
+        }
+        return null;
+    }
+    return priceRecord.sale_price || null;
 }
 function checkStockNum(){
     let outNum = Number(document.getElementById('outNum').value) || 0;
@@ -537,20 +652,27 @@ async function openStockOutForm(){
     if (!allStockOut || allStockOut.length === 0) {
         await loadStockOut();
     }
+    // ✅ 确保换算规格数据已加载
+    if (!window.allGoodsUnitBind || window.allGoodsUnitBind.length === 0) {
+        await loadGoodsUnitBind();
+    }
+    if (!window.allUnitSpecs || window.allUnitSpecs.length === 0) {
+        await loadUnitSpecs();
+    }
     
     document.getElementById('outEditId').value = '';
     document.getElementById('stockOutFormTitle').innerText = '添加出库单据';
 
     // 重置表单
-    document.getElementById('outType').value = '';  // 新增
+    document.getElementById('outType').value = '';
     document.getElementById('outSupSearchInput').value = '';
     document.getElementById('outGoodsSearchInput').value = '';
     document.getElementById('outCurGoodsId').value = '';
     document.getElementById('outSpec').value = '';
-    document.getElementById('outSpecSelect').innerHTML = '<option value="">请先选择商品</option>';  // 修改
+    document.getElementById('outSpecSelect').innerHTML = '<option value="">请先选择商品</option>';
     document.getElementById('outSettleType').value = '';
     document.getElementById('outSalePrice').value = '';
-    document.getElementById('outSalePrice').placeholder = '请先选择商品和换算规格';  // 新增
+    document.getElementById('outSalePrice').placeholder = '请先选择商品和换算规格';
     document.getElementById('totalStockNum').value = '0';
     document.getElementById('outNum').value = '';
     document.getElementById('outRecordDate').value = new Date().toISOString().split('T')[0];
@@ -1007,3 +1129,13 @@ document.addEventListener('click', function(e) {
     });
 });
 window.resetOutSearch = resetOutSearch;
+// ========== 页面初始化加载换算规格数据 ==========
+(async function initOutSpecData() {
+    try {
+        await loadGoodsUnitBind();
+        await loadUnitSpecs();
+        console.log('出库模块规格数据初始化完成');
+    } catch (e) {
+        console.warn('换算规格数据加载失败（不影响主要功能）：', e);
+    }
+})();
