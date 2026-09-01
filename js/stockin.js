@@ -1797,7 +1797,7 @@ async function renderStockIn() {
                 return b.inRecords.some(inItem => inItem.id === item.id);
             });
             if (batch) {
-                // ✅ 修正：batch.batchRemain 已经是最小计量单位，不需要再乘以 convert_rate
+                // ✅ 修正：batch.batchRemain 已经是最小计量单位
                 batchRemain = batch.batchRemain;
             }
         }
@@ -1811,12 +1811,13 @@ async function renderStockIn() {
         if (firstRecord && firstRecord.unit_spec_id && specMap[firstRecord.unit_spec_id]) {
             const spec = specMap[firstRecord.unit_spec_id];
             const specRate = spec.convert_rate || 1;
-            // ✅ 修正：batch.batchRemain 已经是最小计量单位，不需要再乘以 specRate
+            // ✅ 修正：batch.batchRemain 已经是最小计量单位
             totalStock += batch.batchRemain;
         } else {
             totalStock += batch.batchRemain;
         }
     });
+}
 }
             
             if (totalStock === 0 && cacheKey) {
@@ -2047,21 +2048,6 @@ function clearInSort(){
         }
     });
 })();
-
-// ===== 全局点击关闭下拉列表（入库筛选） =====
-document.addEventListener('click', function(e) {
-    const listIds = [
-        'inFilterSupplierList',
-        'inFilterGoodsNameList',
-        'inFilterSettleTypeList'
-    ];
-    listIds.forEach(id => {
-        const box = document.getElementById(id);
-        if (box && !e.target.closest(`#${id}`) && !e.target.closest(`#${id.replace('List', 'Input')}`)) {
-            box.style.display = 'none';
-        }
-    });
-});
 // ============================================================
 // ✅ 暴露入库模块所有函数到 window 对象（供 HTML onclick 调用）
 // ============================================================
@@ -2115,3 +2101,17 @@ document.addEventListener('click', function(e) {
     console.log('✅ openStockInForm 类型:', typeof window.openStockInForm);
     console.log('✅ 入库模块所有函数已暴露到全局');
 })();
+// ===== 全局点击关闭下拉列表（入库筛选） =====
+document.addEventListener('click', function(e) {
+    const listIds = [
+        'inFilterSupplierList',
+        'inFilterGoodsNameList',
+        'inFilterSettleTypeList'
+    ];
+    listIds.forEach(id => {
+        const box = document.getElementById(id);
+        if (box && !e.target.closest(`#${id}`) && !e.target.closest(`#${id.replace('List', 'Input')}`)) {
+            box.style.display = 'none';
+        }
+    });
+});
