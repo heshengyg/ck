@@ -872,16 +872,16 @@ async function toggleReturnBatch(index) {
         displayQty = Math.round(batch.totalInNum / convertRate);
     }
     
+       // 直接赋值为对象即可，不要嵌套 selectedBatchData =
     selectedBatchData = {
-       selectedBatchData = {
-    inRecordId: inRecord.id,
-    inPrice: inRecord.in_price || 0,
-    batchRemain: batch.batchRemain,
-    displayNum: batch.displayNum || 0,  // ✅ 从 batch 获取
-    totalInNum: batch.totalInNum || 0,
-    produceDate: batch.produce_date || '',
-    expireDate: batch.expire_date || ''
-};
+        inRecordId: inRecord.id,
+        inPrice: inRecord.in_price || 0,
+        batchRemain: batch.batchRemain,
+        displayNum: batch.displayNum || 0,
+        totalInNum: batch.totalInNum || 0,
+        produceDate: batch.produce_date || '',
+        expireDate: batch.expire_date || ''
+    };
     
     document.getElementById('returnSupplierSearch').value = batch.supplier;
     document.getElementById('returnCurGoodsId').value = inRecord.id;
