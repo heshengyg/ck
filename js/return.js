@@ -816,7 +816,7 @@ function updateReturnBatchList() {
             <td style="padding:8px;border:1px solid #ddd;text-align:center;">${produceDate}</td>
             <td style="padding:8px;border:1px solid #ddd;text-align:center;">${expireDate}</td>
             <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatMoney(batch.inRecords && batch.inRecords[0] ? batch.inRecords[0].in_price : 0)}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#ff4d4f;">${batch.batchRemain}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#ff4d4f;">${batch.totalInNum}</td>
         </tr>
     `;
 });
@@ -851,12 +851,13 @@ async function toggleReturnBatch(index) {  // 🔥 加上 async
     }
     selectedBatchInRecordId = inRecord.id;
     selectedBatchData = {
-        inRecordId: inRecord.id,
-        inPrice: inRecord.in_price || 0,
-        batchRemain: batch.batchRemain,
-        produceDate: batch.produce_date || '',
-        expireDate: batch.expire_date || ''
-    };
+    inRecordId: inRecord.id,
+    inPrice: inRecord.in_price || 0,
+    batchRemain: batch.batchRemain,      // ✅ 保留用于库存校验
+    totalInNum: batch.totalInNum || 0,   // ✅ 新增：用于显示
+    produceDate: batch.produce_date || '',
+    expireDate: batch.expire_date || ''
+};
     document.getElementById('returnSupplierSearch').value = batch.supplier;
     document.getElementById('returnCurGoodsId').value = inRecord.id;
     
@@ -942,14 +943,19 @@ async function toggleReturnBatch(index) {  // 🔥 加上 async
                 <span><strong>生产日期：</strong>${produceDisplay}</span>
                 <span><strong>到期日期：</strong>${expireDisplay}</span>
                 <span><strong>入库单价：</strong>${formatMoney(selectedBatchData.inPrice)}</span>
-                <span><strong>批次库存：</strong><span style="color:#ff4d4f;font-weight:bold;">${selectedBatchData.batchRemain}</span></span>
+                // 计算原始入库数量（从 batch 中获取 totalInNum）
+const originalQty = batch.totalInNum || 0;
+<span><strong>批次库存：</strong><span style="color:#ff4d4f;font-weight:bold;">${originalQty}</span></span>
             </div>
         </div>
     `;
     document.getElementById('returnInPrice').value = formatMoney(selectedBatchData.inPrice);
     document.getElementById('returnBatchRemain').value = selectedBatchData.batchRemain;
     document.getElementById('returnBatchRemainDisplay').textContent = selectedBatchData.batchRemain;
-    document.getElementById('returnNum').max = selectedBatchData.batchRemain;
+    // 使用 totalInNum 作为最大可退货数量（原始入库数量）
+const maxQty = batch.totalInNum || 0;
+document.getElementById('returnNum').max = maxQty;
+document.getElementById('returnNum').placeholder = `最大可退 ${maxQty}`;
     document.getElementById('returnNum').value = '';
     updateReturnBatchList();
     console.log('✅ 已选择批次:', selectedBatchInRecordId, selectedBatchData);
@@ -1023,7 +1029,8 @@ async function submitReturnGoods() {
         alert('该批次已无库存或已被删除');
         return;
     }
-    if (returnNum > targetBatch.batchRemain) {
+    // 在 submitReturnGoods 函数中，库存校验部分
+if (returnNum > targetBatch.batchRemain) {
     alert(`退货数量不能大于批次库存（${targetBatch.batchRemain}）`);
     return;
 }
