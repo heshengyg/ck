@@ -453,7 +453,7 @@ function onOutSpecChange() {
     }
 }
 // ========== 更新总库存显示（按换算规格） ==========
-function updateTotalStockDisplay() {
+async function updateTotalStockDisplay() {
     const supplier = document.getElementById('outSupSearchInput').value.trim();
     const goodsName = document.getElementById('outGoodsSearchInput').value.trim();
     const specData = outSelectedSpecData;
@@ -474,54 +474,28 @@ function updateTotalStockDisplay() {
     }
     
     // ============================================================
-    // ✅ 直接计算总库存（最小计量单位）- 不依赖缓存
+    // ✅ 从数据库的 total_stock 字段直接读取总库存
     // ============================================================
     let totalBaseUnit = 0;
     
-    if (allStockIn && allStockIn.length > 0) {
-        // 获取该商品的所有入库记录
-        const inRecords = allStockIn.filter(item => 
-            item.supplier === supplier && 
-            item.goodsName === goodsName
-        );
-        
-        console.log('📦 入库记录数量:', inRecords.length);
-        console.log('📦 入库记录:', inRecords);
-        
-        for (const record of inRecords) {
-            // 使用 base_num（最小计量单位数量），如果没有则使用 in_num
-            let stock = record.base_num || record.in_num || 0;
-            
-            // 减去已出库数量
-            if (allStockOut && allStockOut.length > 0) {
-                const outRecords = allStockOut.filter(out => 
-                    out.inRecordId === record.id && 
-                    out.goodsName === goodsName &&
-                    out.supplier === supplier
-                );
-                const totalOut = outRecords.reduce((sum, out) => sum + (out.outNum || 0), 0);
-                stock = stock - totalOut;
-            }
-            
-            // 减去退货数量
-            if (window.allReturnGoods && window.allReturnGoods.length > 0) {
-                const returnRecords = window.allReturnGoods.filter(ret => 
-                    ret.in_record_id === record.id
-                );
-                const totalReturn = returnRecords.reduce((sum, ret) => sum + (ret.return_num || 0), 0);
-                stock = stock - totalReturn;
-            }
-            
-            // 只累加正数
-            if (stock > 0) {
-                totalBaseUnit += stock;
-            }
+    try {
+        const encodedSupplier = encodeURIComponent(supplier);
+        const encodedGoodsName = encodeURIComponent(goodsName);
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}&select=total_stock&limit=1`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const data = await res.json();
+        if (data && data.length > 0 && data[0].total_stock !== null) {
+            totalBaseUnit = Number(data[0].total_stock) || 0;
         }
+    } catch (e) {
+        console.warn('从数据库读取总库存失败，降级为本地计算:', e);
+        // 降级方案：本地计算
+        totalBaseUnit = calculateTotalStockLocally(supplier, goodsName);
     }
     
-    console.log('📊 直接计算总库存:', { supplier, goodsName, totalBaseUnit });
+    console.log('📊 总库存:', totalBaseUnit);
     
-    // 如果总库存为0，显示0
     if (totalBaseUnit === 0) {
         document.getElementById('totalStockNum').value = '0';
         window._outConvertedStockQty = 0;
@@ -530,12 +504,10 @@ function updateTotalStockDisplay() {
         return;
     }
     
-    // 获取换算比例
     const baseUnit = specData.baseUnit || goodsItem.base_unit || '个';
     const specUnit = specData.specName || specData.unit || '个';
     const conversionRate = specData.conversion_rate || 1;
     
-    // 计算换算后的数量
     const convertedQty = Math.floor(totalBaseUnit / conversionRate);
     const remainder = totalBaseUnit % conversionRate;
     
@@ -552,7 +524,6 @@ function updateTotalStockDisplay() {
     
     document.getElementById('totalStockNum').value = displayText;
     
-    // 存储换算后的数量用于出库判断
     window._outConvertedStockQty = convertedQty;
     window._outBaseUnitStockQty = totalBaseUnit;
     window._outConversionRate = conversionRate;
@@ -562,9 +533,7 @@ function updateTotalStockDisplay() {
         conversionRate,
         convertedQty,
         remainder,
-        displayText,
-        baseUnit,
-        specUnit
+        displayText
     });
 }
 // ========== 更新销售价格 ==========
@@ -1008,6 +977,13 @@ if (actualOutBaseQty > baseQty) {
     }
     if(submitSuccess){
         showMsg('出库提交成功');
+// ✅ 新增：出库成功后更新库存字段
+    try {
+        await updateStockFieldsAfterOut(supplier, goodsName);
+    } catch (e) {
+        console.warn('更新库存字段失败（不影响出库）：', e);
+    }
+}
     }else{
         showMsg('部分出库记录提交异常，请检查数据');
     }
@@ -1015,6 +991,87 @@ if (actualOutBaseQty > baseQty) {
     await loadStockOut();
     await loadStockIn();
     refreshAllStockCache(allStockIn, allStockOut);
+}
+// ========== 出库后更新库存字段 ==========
+async function updateStockFieldsAfterOut(supplier, goodsName) {
+    try {
+        console.log('🔄 开始更新出库后库存字段:', supplier, goodsName);
+        
+        // 1. 获取该商品的所有入库记录
+        const encodedSupplier = encodeURIComponent(supplier);
+        const encodedGoodsName = encodeURIComponent(goodsName);
+        
+        const inRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const allInRecords = await inRes.json();
+        
+        if (!allInRecords || allInRecords.length === 0) {
+            console.log('没有找到入库记录');
+            return;
+        }
+        
+        // 2. 获取该商品的所有出库记录
+        const outRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_out?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const allOutRecords = await outRes.json() || [];
+        
+        // 3. 获取该商品的所有退货记录
+        const returnRes = await fetch(`${SUPABASE_URL}/rest/v1/return_goods?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const allReturnRecords = await returnRes.json() || [];
+        
+        // 4. 计算每个批次的剩余库存和总库存
+        let totalStockSum = 0;
+        
+        for (const record of allInRecords) {
+            // 计算该批次已出库数量
+            const outTotal = allOutRecords
+                .filter(out => out.inRecordId === record.id)
+                .reduce((sum, out) => sum + (out.outNum || 0), 0);
+            
+            // 计算该批次已退货数量
+            const returnTotal = allReturnRecords
+                .filter(ret => ret.in_record_id === record.id)
+                .reduce((sum, ret) => sum + (ret.return_num || 0), 0);
+            
+            // 批次剩余库存（最小计量单位）
+            const baseNum = record.base_num || record.in_num || 0;
+            const batchRemain = Math.max(0, baseNum - outTotal - returnTotal);
+            
+            // 更新该记录的 batch_stock
+            await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${record.id}`, {
+                method: 'PATCH',
+                headers: {
+                    apikey: SUPABASE_KEY,
+                    Authorization: `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ batch_stock: batchRemain })
+            });
+            
+            totalStockSum += batchRemain;
+        }
+        
+        // 5. 更新该商品所有记录的 total_stock
+        for (const record of allInRecords) {
+            await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${record.id}`, {
+                method: 'PATCH',
+                headers: {
+                    apikey: SUPABASE_KEY,
+                    Authorization: `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ total_stock: totalStockSum })
+            });
+        }
+        
+        console.log(`✅ 出库后库存字段更新完成: 总库存=${totalStockSum}`);
+    } catch (e) {
+        console.error('出库后更新库存字段失败:', e);
+    }
 }
 // 导出/导入/模板、分页、排序、删除 等通用功能
 function downloadStockOutTemplate(){

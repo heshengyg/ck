@@ -1291,9 +1291,15 @@ async function submitStockIn(){
             });
         }
 
-        // 提交入库成功后
+// 提交入库成功后
 if (res.status >= 200 && res.status < 300) {
-    try { await res.json(); } catch {}
+    let result = await res.json();
+    let newRecordId = result && result.length > 0 ? result[0].id : null;
+    
+    // ✅ 新增：更新库存字段
+    if (newRecordId) {
+        await updateStockFields(newRecordId, supplier, goodsName, unitSpecId);
+    }
     
     // ✅ 新增：入库成功后，更新 price_temp_state 表
     try {
@@ -1399,6 +1405,88 @@ async function updatePriceTempState(goodsId, specId, salePrice) {
         }
     } catch (e) {
         console.error('更新价格表失败:', e);
+    }
+}
+
+// ========== 入库后更新库存字段 ==========
+async function updateStockFields(supplier, goodsName) {
+    try {
+        console.log('🔄 开始更新入库后库存字段:', supplier, goodsName);
+        
+        // 1. 获取该商品的所有入库记录
+        const encodedSupplier = encodeURIComponent(supplier);
+        const encodedGoodsName = encodeURIComponent(goodsName);
+        
+        const inRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const allInRecords = await inRes.json();
+        
+        if (!allInRecords || allInRecords.length === 0) {
+            console.log('没有找到入库记录');
+            return;
+        }
+        
+        // 2. 获取该商品的所有出库记录
+        const outRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_out?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const allOutRecords = await outRes.json() || [];
+        
+        // 3. 获取该商品的所有退货记录
+        const returnRes = await fetch(`${SUPABASE_URL}/rest/v1/return_goods?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const allReturnRecords = await returnRes.json() || [];
+        
+        // 4. 计算每个批次的剩余库存和总库存
+        let totalStockSum = 0;
+        
+        for (const record of allInRecords) {
+            // 计算该批次已出库数量
+            const outTotal = allOutRecords
+                .filter(out => out.inRecordId === record.id)
+                .reduce((sum, out) => sum + (out.outNum || 0), 0);
+            
+            // 计算该批次已退货数量
+            const returnTotal = allReturnRecords
+                .filter(ret => ret.in_record_id === record.id)
+                .reduce((sum, ret) => sum + (ret.return_num || 0), 0);
+            
+            // 批次剩余库存（最小计量单位）
+            const baseNum = record.base_num || record.in_num || 0;
+            const batchRemain = Math.max(0, baseNum - outTotal - returnTotal);
+            
+            // 更新该记录的 batch_stock
+            await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${record.id}`, {
+                method: 'PATCH',
+                headers: {
+                    apikey: SUPABASE_KEY,
+                    Authorization: `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ batch_stock: batchRemain })
+            });
+            
+            totalStockSum += batchRemain;
+        }
+        
+        // 5. 更新该商品所有记录的 total_stock
+        for (const record of allInRecords) {
+            await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${record.id}`, {
+                method: 'PATCH',
+                headers: {
+                    apikey: SUPABASE_KEY,
+                    Authorization: `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ total_stock: totalStockSum })
+            });
+        }
+        
+        console.log(`✅ 入库后库存字段更新完成: 总库存=${totalStockSum}`);
+    } catch (e) {
+        console.error('入库后更新库存字段失败:', e);
     }
 }
 // 下载导入模板
