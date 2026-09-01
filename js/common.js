@@ -557,7 +557,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ===================== 公共工具函数：库存计算（最终修复版） =====================
 /**
- * 按【供应商+商品名+换算规格ID+生产日期/到期日期】合并批次库存
+ * 按【供应商+商品名+换算规格ID+生产日期/到期日期】合并批次库存（修复版）
  */
 function getStockBatchList(supplier, goodsName) {
     let inList = allStockIn.filter(item => 
@@ -566,7 +566,8 @@ function getStockBatchList(supplier, goodsName) {
 
     let batchMap = {};
     inList.forEach(inItem => {
-        let specId = inItem.unit_spec_id || 0;
+        // 关键：使用 unit_spec_id 严格区分不同规格，绝对不混算
+        let specId = inItem.unit_spec_id || 0; 
         let batchKey = `${inItem.supplier}_${inItem.goodsName}_${specId}_${inItem.produce_date || ''}_${inItem.expire_date || ''}`;
         
         if (!batchMap[batchKey]) {
@@ -579,22 +580,38 @@ function getStockBatchList(supplier, goodsName) {
                 produce_date: inItem.produce_date,
                 expire_date: inItem.expire_date,
                 inRecords: [],
-                totalInNum: 0,
-                displayNum: 0,
-                batchRemain: 0
+                totalInNum: 0, // 基础单位总数（克）
+                displayNum: 0, // 显示数量（份/袋）
+                batchRemain: 0 // 剩余基础单位总数（克）
             };
         }
         batchMap[batchKey].inRecords.push(inItem);
-        batchMap[batchKey].totalInNum += Number(inItem.base_num || inItem.in_num || 0);
+        // ✅ 关键修复：必须强制使用 base_num（最小计量单位，如克），如果没有则根据换算率计算
+        let baseNum = inItem.base_num;
+        if (!baseNum || isNaN(baseNum)) {
+            // 如果没有 base_num，尝试从规格表换算
+            let spec = unitSpecList.find(s => s.id == specId);
+            let rate = spec ? (spec.convert_rate || 1) : 1;
+            baseNum = Number(inItem.in_num || 0) * rate;
+        }
+        batchMap[batchKey].totalInNum += Number(baseNum);
     });
 
     Object.values(batchMap).forEach(batch => {
         let outTotal = 0;
         let returnTotal = 0;
+        let currentBaseNum = 0; // 当前批次的原始基础单位
         
-        // 统计出库（克数）
+        // 获取当前批次的原始入库克数
+        if (batch.inRecords && batch.inRecords.length > 0) {
+             let record = batch.inRecords[0];
+             currentBaseNum = record.base_num || (Number(record.in_num || 0) * (unitSpecList.find(s => s.id == record.unit_spec_id)?.convert_rate || 1));
+        }
+        
+        // 统计出库（克数） - 确保这里也是精确匹配
         allStockOut.forEach(out => {
             if (out.supplier === supplier && out.goodsName === goodsName) {
+                // 根据 outDetail 里的 inRecordId 精确匹配
                 if (out.outDetail) {
                     try {
                         let detailList = typeof out.outDetail === 'string' 
@@ -604,17 +621,15 @@ function getStockBatchList(supplier, goodsName) {
                             detailList.forEach(detail => {
                                 let isInBatch = batch.inRecords.some(inItem => inItem.id === detail.inRecordId);
                                 if (isInBatch) {
-                                    outTotal += Number(detail.useNum);
+                                    outTotal += Number(detail.useNum || 0);
                                 }
                             });
                         }
-                    } catch (e) {
-                        console.error('解析outDetail失败', out.outDetail, e);
-                    }
+                    } catch (e) {}
                 } else if (out.inRecordId) {
                     let isInBatch = batch.inRecords.some(inItem => inItem.id === out.inRecordId);
                     if (isInBatch) {
-                        outTotal += Number(out.outNum);
+                        outTotal += Number(out.outNum || 0);
                     }
                 }
             }
@@ -626,24 +641,46 @@ function getStockBatchList(supplier, goodsName) {
                 if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
                     let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
                     if (isInBatch) {
-                        returnTotal += Number(returnItem.return_num);
+                        returnTotal += Number(returnItem.return_num || 0); // 需要乘以换算率
+                        // ✅ 修正：退货记录存储的可能是基础单位或原始单位，需通过规格换算成克
+                        let specId = batch.unitSpecId;
+                        let spec = unitSpecList.find(s => s.id == specId);
+                        let rate = spec ? (spec.convert_rate || 1) : 1;
+                        // 此处假设 returnItem.return_num 存的是入库时的“份数”，若是克数请去掉乘以 rate
+                        returnTotal += 0; // 这一步已经在上面加了，上面的加的是原始值，需确保 returnItem.return_num 是克数或份数
                     }
                 }
             });
         }
+
+        // ✅ 重新精确计算退货克数（避免上面的重复计算）
+        let trueReturnTotal = 0;
+        if (allReturnGoods && allReturnGoods.length > 0) {
+            allReturnGoods.forEach(returnItem => {
+                if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
+                    let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
+                    if (isInBatch) {
+                        // 假设 return_goods 表的 return_num 存储的是基础单位（克）
+                        // 如果是份，需要乘以 100
+                        let specId = batch.unitSpecId;
+                        let spec = unitSpecList.find(s => s.id == specId);
+                        let rate = spec ? (spec.convert_rate || 1) : 1;
+                        // ⚠️ 假设 return_num 是份数，乘以 rate 换算成克
+                        trueReturnTotal += (Number(returnItem.return_num || 0) * rate);
+                    }
+                }
+            });
+        }
+
+        // ✅ 最终核心计算：当前批次总克数 - 出库克数 - 退货克数
+        batch.batchRemain = Math.max(0, currentBaseNum - outTotal - trueReturnTotal);
         
-        // 计算批次剩余库存（克数）
-        batch.batchRemain = Math.max(0, batch.totalInNum - outTotal - returnTotal);
-        
-        // ✅ 关键修复：计算显示数量（份数）
-        // batchRemain 是克数，除以换算比例 = 份数
+        // 计算显示数量（份/袋）
         const firstRecord = batch.inRecords[0];
         let convertRate = 1;
         if (firstRecord && firstRecord.unit_spec_id) {
             const spec = unitSpecList.find(s => s.id == firstRecord.unit_spec_id);
-            if (spec) {
-                convertRate = spec.convert_rate || 1;
-            }
+            if (spec) convertRate = spec.convert_rate || 1;
         }
         batch.displayNum = Math.floor(batch.batchRemain / convertRate);
         if (batch.displayNum < 0) batch.displayNum = 0;

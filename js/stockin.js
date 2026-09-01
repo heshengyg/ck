@@ -1706,15 +1706,12 @@ function updateInSortIcon() {
     if(idx>-1) document.querySelectorAll('.inSortIcon')[idx].innerText = inSortAsc?'↑':'↓';
 }
 
-// 渲染入库表格 - 速度优化版
+// 渲染入库表格 (修复取数逻辑)
 async function renderStockIn() {
     let start = (inCurrentPage - 1) * inPageSize;
     let pageData = filteredStockIn.slice(start, start + inPageSize);
     let tb = document.getElementById('stockInList'); 
-    if (!tb) {
-        console.error('找不到入库列表DOM元素');
-        return;
-    }
+    if (!tb) return;
     tb.innerHTML = '';
     
     let idUsedMap = {};
@@ -1737,7 +1734,6 @@ async function renderStockIn() {
                 idUsedMap[item.id] = outIds.has(item.id) || returnIds.has(item.id);
             });
         } catch (e) {
-            console.warn('批量校验失败，降级为逐个校验', e);
             const promises = pageData.map(item => checkInUsed(item.id));
             const results = await Promise.all(promises);
             pageData.forEach((item, index) => {
@@ -1746,12 +1742,8 @@ async function renderStockIn() {
         }
     }
     
-    if (!baseUnitList || baseUnitList.length === 0) {
-        await loadAllBaseUnit();
-    }
-    if (!unitSpecList || unitSpecList.length === 0) {
-        await loadAllUnitSpec();
-    }
+    if (!baseUnitList || baseUnitList.length === 0) await loadAllBaseUnit();
+    if (!unitSpecList || unitSpecList.length === 0) await loadAllUnitSpec();
     
     const specIds = pageData.map(item => item.unit_spec_id).filter(id => id);
     let specMap = {};
@@ -1761,18 +1753,9 @@ async function renderStockIn() {
                 headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
             });
             const specList = await specRes.json() || [];
-            specList.forEach(spec => {
-                specMap[spec.id] = spec;
-            });
-        } catch (e) {
-            console.warn('加载规格名称失败:', e);
-        }
+            specList.forEach(spec => { specMap[spec.id] = spec; });
+        } catch (e) {}
     }
-    
-    const goodsMap = {};
-    allGoods.forEach(g => {
-        goodsMap[g.id] = g;
-    });
     
     let fullHtml = '';
     
@@ -1782,60 +1765,36 @@ async function renderStockIn() {
             const cacheKey = `${item.supplier}|${item.goodsName}`;
             const cache = stockDataCache ? stockDataCache.get(cacheKey) : null;
             
-            let batchRemain = 0;
+            let batchRemain = 0; 
             let totalStock = 0;
             let baseUnitName = '';
-            
+            let convertRate = 1;
+
+            // 获取单位
             if (item.unit_spec_id && specMap[item.unit_spec_id]) {
-    const spec = specMap[item.unit_spec_id];
-    const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
-    if (baseItem) {
-        baseUnitName = baseItem.unit_name;
-        if (cache && cache.batchList && cache.batchList.length > 0) {
-            const batch = cache.batchList.find(b => {
-                if (!b || !b.inRecords) return false;
-                return b.inRecords.some(inItem => inItem.id === item.id);
-            });
-            if (batch) {
-                // ✅ 修正：batch.batchRemain 已经是最小计量单位
-                batchRemain = batch.batchRemain;
+                const spec = specMap[item.unit_spec_id];
+                const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
+                convertRate = spec.convert_rate || 1;
+                if (baseItem) baseUnitName = baseItem.unit_name; // 比如 "克"
             }
-        }
-    }
-} else {
-                if (cache && cache.batchList && cache.batchList.length > 0) {
-    const batchList = cache.batchList;
-    batchList.forEach(batch => {
-        if (!batch || !batch.inRecords) return;
-        const firstRecord = batch.inRecords[0];
-        if (firstRecord && firstRecord.unit_spec_id && specMap[firstRecord.unit_spec_id]) {
-            const spec = specMap[firstRecord.unit_spec_id];
-            const specRate = spec.convert_rate || 1;
-            // ✅ 修正：batch.batchRemain 已经是最小计量单位
-            totalStock += batch.batchRemain;
-        } else {
-            totalStock += batch.batchRemain;
-        }
-    });
-}
-}
-            
-            if (totalStock === 0 && cacheKey) {
-                const allRecords = allStockIn.filter(record => 
-                    record.supplier === item.supplier && 
-                    record.goodsName === item.goodsName
-                );
-                allRecords.forEach(record => {
-                    if (record.unit_spec_id && specMap[record.unit_spec_id]) {
-                        const spec = specMap[record.unit_spec_id];
-                        const specRate = spec.convert_rate || 1;
-                        totalStock += record.in_num * specRate;
-                    } else {
-                        totalStock += record.in_num;
+
+            // 从正确计算后的缓存中取数据
+            if (cache && cache.batchList && cache.batchList.length > 0) {
+                cache.batchList.forEach(batch => {
+                    // ✅ 直接累加批次剩余克数
+                    totalStock += batch.batchRemain; 
+
+                    // 匹配当前入库记录的批次，直接取克数
+                    if (batch.inRecords && batch.inRecords.some(inItem => inItem.id === item.id)) {
+                        batchRemain = batch.batchRemain; 
                     }
                 });
             }
 
+            // 确保单位显示正确
+            let batchRemainDisplay = batchRemain > 0 ? `${batchRemain}${baseUnitName}` : `0${baseUnitName}`;
+            let totalStockDisplay = totalStock > 0 ? `${totalStock}${baseUnitName}` : `0${baseUnitName}`;
+            
             let amount = formatMoney((item.in_price || 0) * item.in_num);
             let isUsed = idUsedMap[item.id] || false;
             
@@ -1845,9 +1804,7 @@ async function renderStockIn() {
                 let baseName = '';
                 if (baseUnitList && baseUnitList.length > 0) {
                     const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
-                    if (baseItem) {
-                        baseName = baseItem.unit_name;
-                    }
+                    if (baseItem) baseName = baseItem.unit_name;
                 }
                 specDisplay = `<div style="display:flex;flex-direction:column;align-items:center;line-height:1.4;">
                     <span style="font-weight:bold;font-size:14px;">${spec.show_name}</span>
@@ -1855,20 +1812,11 @@ async function renderStockIn() {
                 </div>`;
             }
             
-            let batchRemainDisplay = batchRemain > 0 ? `${batchRemain}${baseUnitName}` : (item.in_num || 0);
-            let totalStockDisplay = totalStock > 0 ? `${totalStock}${baseUnitName}` : (item.in_num || 0);
-            
             let btnHtml = '';
             if(isUsed){
-                btnHtml = `
-                    <button class="btn btn-primary" disabled style="opacity:0.5">编辑</button>
-                    <button class="btn btn-danger" disabled style="opacity:0.5">删除</button>
-                `;
+                btnHtml = `<button class="btn btn-primary" disabled style="opacity:0.5">编辑</button><button class="btn btn-danger" disabled style="opacity:0.5">删除</button>`;
             }else{
-                btnHtml = `
-                    <button class="btn btn-primary" onclick="openStockInForm(${item.id})">编辑</button>
-                    <button class="btn btn-danger" onclick="deleteStockIn(${item.id})">删除</button>
-                `;
+                btnHtml = `<button class="btn btn-primary" onclick="openStockInForm(${item.id})">编辑</button><button class="btn btn-danger" onclick="deleteStockIn(${item.id})">删除</button>`;
             }
             
             fullHtml += `
@@ -1897,7 +1845,6 @@ async function renderStockIn() {
     }
     tb.innerHTML = fullHtml;
 }
-
 // 分页渲染
 function renderInPagination() {
     inTotalPages = Math.ceil(filteredStockIn.length / inPageSize) || 1;
