@@ -1291,19 +1291,116 @@ async function submitStockIn(){
             });
         }
 
-        if (res.status >= 200 && res.status < 300) {
-            try { await res.json(); } catch {}
-            showMsg(editId ? '编辑成功' : '入库成功');
-            closeStockInForm();
-            await loadStockIn();
-            return;
-        }
+        // 提交入库成功后
+if (res.status >= 200 && res.status < 300) {
+    try { await res.json(); } catch {}
+    
+    // ✅ 新增：入库成功后，更新 price_temp_state 表
+    try {
+        await updatePriceTempState(goodsId, unitSpecId, salePrice);
+    } catch (e) {
+        console.warn('更新价格表失败（不影响入库）：', e);
+    }
+    
+    showMsg(editId ? '编辑成功' : '入库成功');
+    closeStockInForm();
+    await loadStockIn();
+    return;
+}
         throw new Error('请求失败');
     } catch (e) {
         showMsg('入库提交失败');
     }
 }
-
+// ========== 更新价格临时表 ==========
+async function updatePriceTempState(goodsId, specId, salePrice) {
+    if (!goodsId) return;
+    
+    // 如果没有 salePrice，尝试从商品信息获取
+    if (!salePrice || salePrice === 0) {
+        const goods = allGoods.find(g => g.id == goodsId);
+        if (goods) {
+            // 如果有规格ID，从 goods_unit_bind 获取价格
+            if (specId) {
+                try {
+                    const bindRes = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${goodsId}&spec_id=eq.${specId}`, {
+                        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+                    });
+                    const bindData = await bindRes.json();
+                    if (bindData && bindData.length > 0 && bindData[0].sale_price) {
+                        salePrice = bindData[0].sale_price;
+                    }
+                } catch (e) {
+                    console.warn('获取规格价格失败:', e);
+                }
+            }
+            // 如果还是没有，使用商品默认价格
+            if (!salePrice || salePrice === 0) {
+                salePrice = goods.sale_price || 0;
+            }
+        }
+    }
+    
+    // 如果 salePrice 为 0 或 null，不更新
+    if (!salePrice || salePrice === 0) {
+        console.log('价格为空，不更新 price_temp_state');
+        return;
+    }
+    
+    // 查询是否已存在记录
+    let query = `${SUPABASE_URL}/rest/v1/price_temp_state?goods_id=eq.${goodsId}`;
+    if (specId) {
+        query += `&spec_id=eq.${specId}`;
+    } else {
+        query += `&spec_id=eq.0`;
+    }
+    
+    try {
+        const checkRes = await fetch(query, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const existingData = await checkRes.json();
+        
+        if (existingData && existingData.length > 0) {
+            // 更新现有记录 - 只更新 sale_price，保留折扣价
+            const updateData = {
+                sale_price: salePrice,
+                updated_at: new Date().toISOString()
+            };
+            await fetch(`${SUPABASE_URL}/rest/v1/price_temp_state?id=eq.${existingData[0].id}`, {
+                method: 'PATCH',
+                headers: {
+                    apikey: SUPABASE_KEY,
+                    Authorization: `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateData)
+            });
+            console.log(`✅ 更新价格记录: goods_id=${goodsId}, spec_id=${specId || 0}, price=${salePrice}`);
+        } else {
+            // 插入新记录
+            const insertData = {
+                goods_id: goodsId,
+                spec_id: specId || 0,
+                sale_price: salePrice,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            };
+            await fetch(`${SUPABASE_URL}/rest/v1/price_temp_state`, {
+                method: 'POST',
+                headers: {
+                    apikey: SUPABASE_KEY,
+                    Authorization: `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(insertData)
+            });
+            console.log(`✅ 新增价格记录: goods_id=${goodsId}, spec_id=${specId || 0}, price=${salePrice}`);
+        }
+    } catch (e) {
+        console.error('更新价格表失败:', e);
+    }
+}
 // 下载导入模板
 function downloadStockInTemplate(){
     const header = ["供应商","商品名称","规格","结算方式","销售单价","入库单价","入库数量","录入日期","生产日期","到期日期"];

@@ -54,6 +54,26 @@ async function loadUnitSpecs() {
         return [];
     }
 }
+// ========== 加载基础单位数据 ==========
+async function loadAllBaseUnits() {
+    try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/base_unit?select=*`, {
+            headers: {
+                apikey: SUPABASE_KEY,
+                Authorization: `Bearer ${SUPABASE_KEY}`
+            }
+        });
+        if (!response.ok) throw new Error('加载基础单位失败');
+        const data = await response.json();
+        window.allBaseUnits = data;
+        console.log('基础单位加载完成:', data.length);
+        return data;
+    } catch (e) {
+        console.error('加载基础单位失败：', e);
+        window.allBaseUnits = [];
+        return [];
+    }
+}
 // ========== 出库筛选下拉 ==========
 function initOutFilterData() {
     if (!allStockOut || allStockOut.length === 0) return;
@@ -263,7 +283,10 @@ async function selectOutGoods(goods){
             if (!window.allUnitSpecs || window.allUnitSpecs.length === 0) {
                 await loadUnitSpecs();
             }
-            
+            // ✅ 新增：加载基础单位数据
+if (!window.allBaseUnits || window.allBaseUnits.length === 0) {
+    await loadAllBaseUnits();
+}
             // 查找该商品的所有规格绑定
             const bindSpecs = window.allGoodsUnitBind.filter(bind => 
                 bind.goods_id === goodsItem.id
@@ -276,16 +299,29 @@ bindSpecs.forEach((bind, index) => {
     // 获取规格信息
     const specItem = window.allUnitSpecs?.find(s => s.id === bind.spec_id);
     const specName = specItem?.show_name || `规格${index + 1}`;
-    const baseUnit = goodsItem.base_unit || '个';
+    
+    // ✅ 修复：从 base_unit 表获取基础单位名称，而不是从 goodsItem.base_unit
+    let baseUnitName = '个';
+    if (specItem && specItem.base_unit_id) {
+        const baseItem = window.allBaseUnits?.find(b => b.id === specItem.base_unit_id);
+        if (baseItem && baseItem.unit_name) {
+            baseUnitName = baseItem.unit_name;
+        }
+    }
+    // 如果没有 base_unit_id，使用 goodsItem.base_unit 作为备选
+    if (baseUnitName === '个' && goodsItem.base_unit) {
+        baseUnitName = goodsItem.base_unit;
+    }
+    
     const conversionRate = specItem?.convert_rate || 1;
     
     const option = document.createElement('option');
     option.value = bind.spec_id;
-    // ✅ 修改：与入库格式保持一致：规格名（换算比例+基础单位）
-    option.textContent = `${specName}（${conversionRate}${baseUnit}）`;
+    // ✅ 修复：使用 baseUnitName 而不是 goodsItem.base_unit
+    option.textContent = `${specName}（${conversionRate}${baseUnitName}）`;
     option.dataset.specId = bind.spec_id;
     option.dataset.conversionRate = conversionRate;
-    option.dataset.baseUnit = baseUnit;
+    option.dataset.baseUnit = baseUnitName;  // ✅ 存储正确的基础单位名称
     option.dataset.specName = specName;
     specSelect.appendChild(option);
     
@@ -294,11 +330,12 @@ bindSpecs.forEach((bind, index) => {
         display: specName,
         originalSpec: goods.spec || '',
         unit: specName,
-        baseUnit: baseUnit,
+        baseUnit: baseUnitName,  // ✅ 使用正确的基础单位名称
         conversion_rate: conversionRate,
         specName: specName,
         goodsId: goodsItem.id,
-        bindId: bind.id
+        bindId: bind.id,
+        baseUnitId: specItem?.base_unit_id || null
     });
 });
             
@@ -424,15 +461,13 @@ function updateTotalStockDisplay() {
         return;
     }
     
-    // ✅ 获取总库存（最小计量单位）- 从缓存中获取
     const totalBaseUnit = getTotalStockNum(supplier, goodsName);
     
-    // 获取换算比例
-    const baseUnit = goodsItem.base_unit || '个';
+    // ✅ 修复：使用 specData 中存储的 baseUnit
+    const baseUnit = specData.baseUnit || goodsItem.base_unit || '个';
     const specUnit = specData.specName || specData.unit || '个';
     const conversionRate = specData.conversion_rate || 1;
     
-    // ✅ 计算换算后的数量
     const convertedQty = Math.floor(totalBaseUnit / conversionRate);
     const remainder = totalBaseUnit % conversionRate;
     
@@ -449,18 +484,18 @@ function updateTotalStockDisplay() {
     
     document.getElementById('totalStockNum').value = displayText;
     
-    // 存储换算后的数量用于出库判断
     window._outConvertedStockQty = convertedQty;
     window._outBaseUnitStockQty = totalBaseUnit;
     window._outConversionRate = conversionRate;
     
-    // ✅ 控制台输出调试信息
     console.log('总库存换算:', {
         totalBaseUnit,
         conversionRate,
         convertedQty,
         remainder,
         displayText,
+        baseUnit,
+        specUnit,
         specData
     });
 }
@@ -676,7 +711,10 @@ async function openStockOutForm(){
     if (!window.allUnitSpecs || window.allUnitSpecs.length === 0) {
         await loadUnitSpecs();
     }
-    
+    // ✅ 新增：加载基础单位数据
+    if (!window.allBaseUnits || window.allBaseUnits.length === 0) {
+        await loadAllBaseUnits();
+    }
     document.getElementById('outEditId').value = '';
     document.getElementById('stockOutFormTitle').innerText = '添加出库单据';
 
@@ -1151,6 +1189,7 @@ window.resetOutSearch = resetOutSearch;
     try {
         await loadGoodsUnitBind();
         await loadUnitSpecs();
+        await loadAllBaseUnits();  // ✅ 新增
         console.log('出库模块规格数据初始化完成');
     } catch (e) {
         console.warn('换算规格数据加载失败（不影响主要功能）：', e);
