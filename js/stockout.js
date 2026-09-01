@@ -271,35 +271,36 @@ async function selectOutGoods(goods){
             
             console.log('商品规格绑定:', bindSpecs);
             
-            // 构建下拉选项
-            bindSpecs.forEach((bind, index) => {
-                // 获取规格信息
-                const specItem = window.allUnitSpecs?.find(s => s.id === bind.spec_id);
-                const specName = specItem?.show_name || `规格${index + 1}`;
-                const baseUnit = goodsItem.base_unit || '个';
-                const conversionRate = specItem?.convert_rate || 1;
-                
-                const option = document.createElement('option');
-                option.value = bind.spec_id;  // 使用 spec_id 作为值
-                option.textContent = `${specName}（1${specName}=${conversionRate}${baseUnit}）`;
-                option.dataset.specId = bind.spec_id;
-                option.dataset.conversionRate = conversionRate;
-                option.dataset.baseUnit = baseUnit;
-                option.dataset.specName = specName;
-                specSelect.appendChild(option);
-                
-                outCurrSpecOptions.push({
-                    specId: bind.spec_id,
-                    display: specName,
-                    originalSpec: goods.spec || '',
-                    unit: specName,
-                    baseUnit: baseUnit,
-                    conversion_rate: conversionRate,
-                    specName: specName,
-                    goodsId: goodsItem.id,
-                    bindId: bind.id
-                });
-            });
+            // 构建下拉选项 - 与入库保持一致的显示格式
+bindSpecs.forEach((bind, index) => {
+    // 获取规格信息
+    const specItem = window.allUnitSpecs?.find(s => s.id === bind.spec_id);
+    const specName = specItem?.show_name || `规格${index + 1}`;
+    const baseUnit = goodsItem.base_unit || '个';
+    const conversionRate = specItem?.convert_rate || 1;
+    
+    const option = document.createElement('option');
+    option.value = bind.spec_id;
+    // ✅ 修改：与入库格式保持一致：规格名（换算比例+基础单位）
+    option.textContent = `${specName}（${conversionRate}${baseUnit}）`;
+    option.dataset.specId = bind.spec_id;
+    option.dataset.conversionRate = conversionRate;
+    option.dataset.baseUnit = baseUnit;
+    option.dataset.specName = specName;
+    specSelect.appendChild(option);
+    
+    outCurrSpecOptions.push({
+        specId: bind.spec_id,
+        display: specName,
+        originalSpec: goods.spec || '',
+        unit: specName,
+        baseUnit: baseUnit,
+        conversion_rate: conversionRate,
+        specName: specName,
+        goodsId: goodsItem.id,
+        bindId: bind.id
+    });
+});
             
             // 如果没有换算规格，添加默认选项
             if (bindSpecs.length === 0) {
@@ -376,6 +377,8 @@ function onOutSpecChange() {
     const select = document.getElementById('outSpecSelect');
     const selectedValue = parseInt(select.value);  // spec_id
     
+    console.log('规格变更:', { selectedValue, options: outCurrSpecOptions });
+    
     if (!selectedValue && selectedValue !== 0) {
         document.getElementById('outSpec').value = '';
         document.getElementById('outSalePrice').value = '';
@@ -390,6 +393,8 @@ function onOutSpecChange() {
     if (specData) {
         outSelectedSpecData = specData;
         document.getElementById('outSpec').value = specData.originalSpec || '';
+        
+        console.log('选中规格数据:', specData);
         
         // 更新总库存显示（按换算规格）
         updateTotalStockDisplay();
@@ -419,7 +424,7 @@ function updateTotalStockDisplay() {
         return;
     }
     
-    // 获取总库存（最小计量单位）
+    // ✅ 获取总库存（最小计量单位）- 从缓存中获取
     const totalBaseUnit = getTotalStockNum(supplier, goodsName);
     
     // 获取换算比例
@@ -427,7 +432,7 @@ function updateTotalStockDisplay() {
     const specUnit = specData.specName || specData.unit || '个';
     const conversionRate = specData.conversion_rate || 1;
     
-    // 计算换算后的数量
+    // ✅ 计算换算后的数量
     const convertedQty = Math.floor(totalBaseUnit / conversionRate);
     const remainder = totalBaseUnit % conversionRate;
     
@@ -448,6 +453,16 @@ function updateTotalStockDisplay() {
     window._outConvertedStockQty = convertedQty;
     window._outBaseUnitStockQty = totalBaseUnit;
     window._outConversionRate = conversionRate;
+    
+    // ✅ 控制台输出调试信息
+    console.log('总库存换算:', {
+        totalBaseUnit,
+        conversionRate,
+        convertedQty,
+        remainder,
+        displayText,
+        specData
+    });
 }
 // ========== 更新销售价格 ==========
 async function updateSalePrice() {
@@ -515,7 +530,10 @@ async function updateSalePrice() {
     // 获取价格 - 使用 specData.specId
     try {
         const specId = specData.specId || 0;
+        console.log('获取价格参数:', { goodsId: goodsItem.id, specId, bzStatus });
         let price = await getSalePriceByBzStatusAndSpec(goodsItem.id, specId, bzStatus);
+        
+        console.log('获取到的价格:', price);
         
         if (price === null || price === undefined || price === 0) {
             priceInput.value = '';
@@ -537,20 +555,13 @@ async function updateSalePrice() {
     }
 }
 // ========== 根据规格获取价格 ==========
+// ========== 根据规格获取价格 ==========
 async function getSalePriceByBzStatusAndSpec(goodsId, specId, bzStatus) {
     try {
-        // 构建查询：按 goods_id + spec_id 查询
-        let query = `${SUPABASE_URL}/rest/v1/price_temp_state?goods_id=eq.${goodsId}&select=*`;
+        // 构建查询：按 goods_id + spec_id 精确查询
+        let query = `${SUPABASE_URL}/rest/v1/price_temp_state?goods_id=eq.${goodsId}&spec_id=eq.${specId}&select=*`;
         
-        // 如果有规格ID且不为0，添加规格条件
-        if (specId && specId > 0) {
-            query += `&spec_id=eq.${specId}`;
-        } else {
-            // 如果没有规格ID，查询默认规格 (spec_id=0)
-            query += `&spec_id=eq.0`;
-        }
-        
-        console.log('查询价格:', query);
+        console.log('🔍 查询价格:', query);
         const response = await fetch(query, {
             headers: {
                 apikey: SUPABASE_KEY,
@@ -559,15 +570,18 @@ async function getSalePriceByBzStatusAndSpec(goodsId, specId, bzStatus) {
         });
         
         if (!response.ok) {
-            console.warn('价格表查询失败');
+            console.warn('价格表查询失败:', response.status);
             return null;
         }
         
         const data = await response.json();
+        console.log('📊 价格数据:', data);
+        
         if (!data || data.length === 0) {
-            // 如果没有找到该规格的价格，尝试查找该商品的默认价格（spec_id=0）
+            // 如果没有找到该规格的价格，尝试查找默认规格 (spec_id=0)
             if (specId > 0) {
                 const fallbackQuery = `${SUPABASE_URL}/rest/v1/price_temp_state?goods_id=eq.${goodsId}&spec_id=eq.0&select=*`;
+                console.log('🔍 降级查询默认价格:', fallbackQuery);
                 const fallbackResponse = await fetch(fallbackQuery, {
                     headers: {
                         apikey: SUPABASE_KEY,
@@ -594,11 +608,13 @@ async function getSalePriceByBzStatusAndSpec(goodsId, specId, bzStatus) {
 
 // ========== 辅助：从价格记录中提取价格 ==========
 function getPriceFromRecord(priceRecord, bzStatus) {
+    console.log('📋 提取价格, 状态:', bzStatus, '记录:', priceRecord);
+    
     // 根据状态返回对应的价格
     if (bzStatus === '正常') {
-        return priceRecord.sale_price || null;
+        return priceRecord.sale_price !== undefined && priceRecord.sale_price !== null ? Number(priceRecord.sale_price) : null;
     } else if (bzStatus === '过期') {
-        return priceRecord.expire_price || null;
+        return priceRecord.expire_price !== undefined && priceRecord.expire_price !== null ? Number(priceRecord.expire_price) : null;
     } else if (bzStatus.startsWith('discount_')) {
         const match = bzStatus.match(/discount_(\d+)/);
         if (match) {
@@ -611,12 +627,13 @@ function getPriceFromRecord(priceRecord, bzStatus) {
             };
             const field = fieldMap[idx];
             if (field && priceRecord[field] !== undefined && priceRecord[field] !== null) {
-                return priceRecord[field];
+                return Number(priceRecord[field]);
             }
         }
         return null;
     }
-    return priceRecord.sale_price || null;
+    // 默认返回 sale_price
+    return priceRecord.sale_price !== undefined && priceRecord.sale_price !== null ? Number(priceRecord.sale_price) : null;
 }
 function checkStockNum(){
     let outNum = Number(document.getElementById('outNum').value) || 0;
