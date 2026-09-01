@@ -1,3 +1,18 @@
+// ============================================================
+// ✅ 紧急占位：提前暴露函数（防止 HTML 按钮报错）
+// ============================================================
+(function() {
+    console.log('🚀 stockout.js 开始加载...');
+    
+    // 先占位
+    if (typeof window.openStockOutForm === 'undefined') {
+        window.openStockOutForm = function() {
+            console.warn('⚠️ openStockOutForm 占位函数被调用');
+            alert('出库功能正在加载，请刷新页面后重试');
+        };
+        console.log('✅ 占位函数已设置');
+    }
+})();
 // ===================== 出库模块 - 纯业务函数 =====================
 let outCurrSupplierList = [];
 let outCurrGoodsList = [];
@@ -11,13 +26,26 @@ let outFilterData = {
     settleType: ['线上', '线下']
 };
 
-// ========== 分页相关 - 使用 var 避免重复声明错误 ==========
-var outCurrentPage = 1;
-var outPageSize = 10;
-var outTotalPages = 1;
-var outSortField = '';
-var outSortAsc = true;
-var filteredStockOut = [];
+// ========== // ========== 分页相关 ==========
+// 使用 var 并检查是否已存在，避免重复声明
+if (typeof outCurrentPage === 'undefined') {
+    var outCurrentPage = 1;
+}
+if (typeof outPageSize === 'undefined') {
+    var outPageSize = 10;
+}
+if (typeof outTotalPages === 'undefined') {
+    var outTotalPages = 1;
+}
+if (typeof outSortField === 'undefined') {
+    var outSortField = '';
+}
+if (typeof outSortAsc === 'undefined') {
+    var outSortAsc = true;
+}
+if (typeof filteredStockOut === 'undefined') {
+    var filteredStockOut = [];
+}
 
 // ========== 刷新出库列表 ==========
 function refreshStockOut() {
@@ -1356,48 +1384,3 @@ document.addEventListener('click', function(e) {
 
 // 确保 resetOutSearch 也暴露到全局
 window.resetOutSearch = resetOutSearch;
-// ============================================================
-// ✅ 暴露函数到全局（修复 onclick 找不到函数的问题）
-// ============================================================
-window.openStockOutForm = openStockOutForm;
-window.closeStockOutForm = closeStockOutForm;
-window.submitStockOut = submitStockOut;
-window.selectOutGoods = selectOutGoods;
-window.onOutSpecChange = onOutSpecChange;
-window.checkStockNum = checkStockNum;
-window.showOutSupList = showOutSupList;
-window.filterOutSupList = filterOutSupList;
-window.showOutGoodsList = showOutGoodsList;
-window.filterOutGoodsList = filterOutGoodsList;
-window.deleteStockOut = deleteStockOut;
-window.batchDeleteStockOut = batchDeleteStockOut;
-window.refreshStockOut = refreshStockOut;
-window.resetOutSearch = resetOutSearch;
-window.exportStockOutExcel = exportStockOutExcel;
-window.downloadStockOutTemplate = downloadStockOutTemplate;
-window.loadOutGoodsBySupplier = loadOutGoodsBySupplier;
-window.renderOutSupList = renderOutSupList;
-window.renderOutGoodsList = renderOutGoodsList;
-window.renderStockOut = renderStockOut;
-window.filterStockOut = filterStockOut;
-window.outGoToPage = outGoToPage;
-window.outPrevPage = outPrevPage;
-window.outNextPage = outNextPage;
-window.changeOutPageSize = changeOutPageSize;
-window.outToggleSelectAll = outToggleSelectAll;
-window.outSortTable = outSortTable;
-window.clearOutSort = clearOutSort;
-window.showOutFilterList = showOutFilterList;
-window.filterOutFilterList = filterOutFilterList;
-window.onOutFilterInput = onOutFilterInput;
-window.updateTotalStockDisplay = updateTotalStockDisplay;
-window.updateSalePrice = updateSalePrice;
-window.getSalePriceByBzStatusAndSpec = getSalePriceByBzStatusAndSpec;
-window.getPriceFromRecord = getPriceFromRecord;
-window.loadGoodsUnitBind = loadGoodsUnitBind;
-window.loadUnitSpecs = loadUnitSpecs;
-window.loadAllBaseUnits = loadAllBaseUnits;
-window.updateStockFieldsAfterOut = updateStockFieldsAfterOut;
-
-console.log('✅ 出库模块所有函数已暴露到全局');
-console.log('openStockOutForm 类型:', typeof window.openStockOutForm);
