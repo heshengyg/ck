@@ -490,7 +490,7 @@ async function updateTotalStockDisplay() {
         return;
     }
     
-    // ✅ 直接从批次列表计算总库存（不依赖数据库 total_stock）
+    // ✅ 直接从 getStockBatchList 计算总库存
     const batchList = getStockBatchList(supplier, goodsName);
     let totalBaseUnit = 0;
     for (const batch of batchList) {
