@@ -490,24 +490,14 @@ async function updateTotalStockDisplay() {
         return;
     }
     
+    // ✅ 直接从批次列表计算总库存（不依赖数据库 total_stock）
+    const batchList = getStockBatchList(supplier, goodsName);
     let totalBaseUnit = 0;
-    
-    try {
-        const encodedSupplier = encodeURIComponent(supplier);
-        const encodedGoodsName = encodeURIComponent(goodsName);
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}&select=total_stock&limit=1`, {
-            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-        });
-        const data = await res.json();
-        if (data && data.length > 0 && data[0].total_stock !== null) {
-            totalBaseUnit = Number(data[0].total_stock) || 0;
-        }
-    } catch (e) {
-        console.warn('从数据库读取总库存失败，降级为本地计算:', e);
-        totalBaseUnit = calculateTotalStockLocally(supplier, goodsName);
+    for (const batch of batchList) {
+        totalBaseUnit += batch.batchRemain;
     }
     
-    console.log('📊 总库存:', totalBaseUnit);
+    console.log('📊 计算总库存:', totalBaseUnit);
     
     if (totalBaseUnit === 0) {
         document.getElementById('totalStockNum').value = '0';
@@ -549,7 +539,6 @@ async function updateTotalStockDisplay() {
         displayText
     });
 }
-
 // ========== 根据规格获取价格 ==========
 async function getSalePriceByBzStatusAndSpec(goodsId, specId, bzStatus) {
     try {
