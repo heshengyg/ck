@@ -579,21 +579,23 @@ function getStockBatchList(supplier, goodsName) {
                 produce_date: inItem.produce_date,
                 expire_date: inItem.expire_date,
                 inRecords: [],
-                totalInNum: 0,        // ✅ 最小计量单位（克数），用于库存计算
-                displayNum: 0,         // ✅ 新增：原始入库数量（按规格单位显示）
+                totalInNum: 0,        // 最小计量单位（克），用于库存计算
+                displayNum: 0,         // 原始入库数量（份/袋），用于显示
                 batchRemain: 0
             };
         }
         batchMap[batchKey].inRecords.push(inItem);
-        // totalInNum 累加最小计量单位（克数）
         batchMap[batchKey].totalInNum += Number(inItem.base_num || inItem.in_num || 0);
-        // displayNum 累加原始入库数量（in_num）
         batchMap[batchKey].displayNum += Number(inItem.in_num || 0);
     });
+
     Object.values(batchMap).forEach(batch => {
-        let outTotal = 0;
-        let returnTotal = 0;
+        let outTotal = 0;           // 出库最小计量单位（克）
+        let returnTotal = 0;        // 退货最小计量单位（克）
+        let outDisplayTotal = 0;    // 出库原始数量（份/袋）
+        let returnDisplayTotal = 0; // 退货原始数量（份/袋）
         
+        // 统计出库
         allStockOut.forEach(out => {
             if (out.supplier === supplier && out.goodsName === goodsName) {
                 if (out.outDetail) {
@@ -606,6 +608,12 @@ function getStockBatchList(supplier, goodsName) {
                                 let isInBatch = batch.inRecords.some(inItem => inItem.id === detail.inRecordId);
                                 if (isInBatch) {
                                     outTotal += Number(detail.useNum);
+                                    // ✅ 计算出库的原始数量：useNum / convert_rate
+                                    // 但 useNum 已经是最小计量单位，需要根据批次规格换算
+                                    // 这里我们暂时用 useNum 作为原始数量（因为 outNum 也是最小计量单位）
+                                    // 实际上出库时 outNum 是最小计量单位，所以这里 useNum 就是克数
+                                    // 但 displayNum 需要扣减原始数量，所以需要换算
+                                    // 下面用另一种方式处理
                                 }
                             });
                         }
@@ -621,18 +629,42 @@ function getStockBatchList(supplier, goodsName) {
             }
         });
         
+        // ✅ 统计退货（直接累加原始数量 return_num）
         if (allReturnGoods && allReturnGoods.length > 0) {
             allReturnGoods.forEach(returnItem => {
                 if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
                     let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
                     if (isInBatch) {
                         returnTotal += Number(returnItem.return_num);
+                        // ✅ 退货的 return_num 是原始数量（份/袋），直接累加
+                        returnDisplayTotal += Number(returnItem.return_num);
                     }
                 }
             });
         }
         
+        // 计算批次剩余库存（最小计量单位）
         batch.batchRemain = Math.max(0, batch.totalInNum - outTotal - returnTotal);
+        
+        // ✅ 计算显示数量：原始入库数量 - 退货原始数量 - 出库原始数量
+        // 出库原始数量 = 出库克数 / 换算比例
+        // 但出库时 outNum 也是最小计量单位，所以需要换算
+        // 简单方式：用 batchRemain / 每单位克数 计算剩余份数
+        // 但不同批次的换算比例可能不同，需要从 inRecords 中获取
+        const firstRecord = batch.inRecords[0];
+        let convertRate = 1;
+        if (firstRecord && firstRecord.unit_spec_id) {
+            const spec = unitSpecList.find(s => s.id == firstRecord.unit_spec_id);
+            if (spec) {
+                convertRate = spec.convert_rate || 1;
+            }
+        }
+        // ✅ 按比例计算剩余显示数量
+        if (batch.totalInNum > 0 && batch.displayNum > 0) {
+            const ratio = batch.batchRemain / batch.totalInNum;
+            batch.displayNum = Math.round(batch.displayNum * ratio);
+        }
+        if (batch.displayNum < 0) batch.displayNum = 0;
     });
 
     let batchList = Object.values(batchMap).filter(b => b.batchRemain > 0);

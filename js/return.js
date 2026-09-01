@@ -788,42 +788,45 @@ function updateReturnBatchList() {
             <tbody>
     `;
     allBatches.forEach((batch, idx) => {
-    // ========== 🔥 修改：规格显示入库规格名称 ==========
-    let specDisplay = '-';
-    if (batch.inRecords && batch.inRecords.length > 0) {
-        const inRecord = batch.inRecords[0];
-        if (inRecord.unit_spec_id && unitSpecList) {
-            const spec = unitSpecList.find(s => s.id == inRecord.unit_spec_id);
-            if (spec) {
-                const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
-                specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+        // ========== 🔥 规格显示入库规格名称 ==========
+        let specDisplay = '-';
+        if (batch.inRecords && batch.inRecords.length > 0) {
+            const inRecord = batch.inRecords[0];
+            if (inRecord.unit_spec_id && unitSpecList) {
+                const spec = unitSpecList.find(s => s.id == inRecord.unit_spec_id);
+                if (spec) {
+                    const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
+                    specDisplay = spec.show_name + '（' + spec.convert_rate + (baseItem ? baseItem.unit_name : '') + '）';
+                }
             }
         }
-    }
-    
-    const produceDate = batch.produce_date && batch.produce_date !== '-' ? batch.produce_date : '-';
-    const expireDate = batch.expire_date && batch.expire_date !== '-' ? batch.expire_date : '-';
-    const isSelected = batch.inRecords && batch.inRecords[0] && selectedBatchInRecordId === batch.inRecords[0].id;
-    const selectBg = isSelected ? 'style="background:#d4edda;"' : '';
-    html += `
-        <tr ${selectBg}>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;">
-                <input type="radio" name="returnBatchSelect" value="${idx}" ${isSelected ? 'checked' : ''} onclick="toggleReturnBatch(${idx})">
-            </td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.supplier}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.goodsName}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${specDisplay}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${produceDate}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;">${expireDate}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatMoney(batch.inRecords && batch.inRecords[0] ? batch.inRecords[0].in_price : 0)}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#ff4d4f;">${batch.displayNum || batch.totalInNum}</td>
-        </tr>
-    `;
-});
+        
+        const produceDate = batch.produce_date && batch.produce_date !== '-' ? batch.produce_date : '-';
+        const expireDate = batch.expire_date && batch.expire_date !== '-' ? batch.expire_date : '-';
+        const isSelected = batch.inRecords && batch.inRecords[0] && selectedBatchInRecordId === batch.inRecords[0].id;
+        const selectBg = isSelected ? 'style="background:#d4edda;"' : '';
+        
+        // ✅ 计算显示数量（原始数量，如 份/袋）
+        const displayQty = batch.displayNum !== undefined ? batch.displayNum : batch.totalInNum;
+        
+        html += `
+            <tr ${selectBg}>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;">
+                    <input type="radio" name="returnBatchSelect" value="${idx}" ${isSelected ? 'checked' : ''} onclick="toggleReturnBatch(${idx})">
+                </td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.supplier}</td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${batch.goodsName}</td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${specDisplay}</td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${produceDate}</td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;">${expireDate}</td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatMoney(batch.inRecords && batch.inRecords[0] ? batch.inRecords[0].in_price : 0)}</td>
+                <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#ff4d4f;">${displayQty}</td>
+            </tr>
+        `;
+    });
     html += '</tbody></table>';
     container.innerHTML = html;
 }
-
 // ========== 切换批次选择 ==========
 async function toggleReturnBatch(index) {  // 🔥 加上 async
     const allBatches = window._returnBatchListData || [];
@@ -932,23 +935,21 @@ async function toggleReturnBatch(index) {  // 🔥 加上 async
     document.getElementById('returnSalePrice').value = formatMoney(finalDisplayPrice);
     window._returnSelectedPrice = finalDisplayPrice;
     
-    const produceDisplay = selectedBatchData.produceDate || '-';
-    const expireDisplay = selectedBatchData.expireDate || '-';
-    document.getElementById('returnSelectedBatchInfo').innerHTML = `
-        <div style="background:#f0f9f4;padding:12px;border-radius:4px;border-left:3px solid #52c41a;">
-            <div style="display:flex;gap:20px;flex-wrap:wrap;">
-                <span><strong>供应商：</strong>${batch.supplier}</span>
-                <span><strong>商品：</strong>${batch.goodsName}</span>
-                <span><strong>规格：</strong>${specDisplay}</span>
-                <span><strong>生产日期：</strong>${produceDisplay}</span>
-                <span><strong>到期日期：</strong>${expireDisplay}</span>
-                <span><strong>入库单价：</strong>${formatMoney(selectedBatchData.inPrice)}</span>
-                // 计算原始入库数量（从 batch 中获取 totalInNum）
-const originalQty = batch.displayNum || batch.totalInNum || 0;
-<span><strong>批次库存：</strong><span style="color:#ff4d4f;font-weight:bold;">${originalQty}</span></span>
-            </div>
+    const displayQty = selectedBatchData.displayNum || 0;
+const totalGrams = selectedBatchData.batchRemain || 0;
+document.getElementById('returnSelectedBatchInfo').innerHTML = `
+    <div style="background:#f0f9f4;padding:12px;border-radius:4px;border-left:3px solid #52c41a;">
+        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+            <span><strong>供应商：</strong>${batch.supplier}</span>
+            <span><strong>商品：</strong>${batch.goodsName}</span>
+            <span><strong>规格：</strong>${specDisplay}</span>
+            <span><strong>生产日期：</strong>${selectedBatchData.produceDate || '-'}</span>
+            <span><strong>到期日期：</strong>${selectedBatchData.expireDate || '-'}</span>
+            <span><strong>入库单价：</strong>${formatMoney(selectedBatchData.inPrice)}</span>
+            <span><strong>批次库存：</strong><span style="color:#ff4d4f;font-weight:bold;">${displayQty}</span></span>
         </div>
-    `;
+    </div>
+`;
     document.getElementById('returnInPrice').value = formatMoney(selectedBatchData.inPrice);
     document.getElementById('returnBatchRemain').value = selectedBatchData.batchRemain;
     document.getElementById('returnBatchRemainDisplay').textContent = selectedBatchData.batchRemain;
@@ -1018,20 +1019,32 @@ async function submitReturnGoods() {
     if (!recordDate) return alert('请选择录入日期');
 
     const batchList = getStockBatchList(supplier, goodsName);
-    let targetBatch = null;
-    for (const batch of batchList) {
-        if (batch.inRecords && batch.inRecords.some(r => r.id === selectedBatchInRecordId)) {
-            targetBatch = batch;
-            break;
-        }
+let targetBatch = null;
+for (const batch of batchList) {
+    if (batch.inRecords && batch.inRecords.some(r => r.id === selectedBatchInRecordId)) {
+        targetBatch = batch;
+        break;
     }
-    if (!targetBatch) {
-        alert('该批次已无库存或已被删除');
-        return;
+}
+if (!targetBatch) {
+    alert('该批次已无库存或已被删除');
+    return;
+}
+
+// ✅ 计算退货的原始数量对应的最小计量单位
+// 获取换算比例
+let convertRate = 1;
+const firstRecord = targetBatch.inRecords[0];
+if (firstRecord && firstRecord.unit_spec_id) {
+    const spec = unitSpecList.find(s => s.id == firstRecord.unit_spec_id);
+    if (spec) {
+        convertRate = spec.convert_rate || 1;
     }
-    // 在 submitReturnGoods 函数中，库存校验部分
-if (returnNum > targetBatch.batchRemain) {
-    alert(`退货数量不能大于批次库存（${targetBatch.batchRemain}）`);
+}
+const returnBaseQty = returnNum * convertRate;
+
+if (returnBaseQty > targetBatch.batchRemain) {
+    alert(`退货数量不能大于批次库存（${Math.floor(targetBatch.batchRemain / convertRate)}份）`);
     return;
 }
     const returnAmount = inPrice * returnNum;
