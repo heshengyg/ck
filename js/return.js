@@ -816,7 +816,7 @@ function updateReturnBatchList() {
             <td style="padding:8px;border:1px solid #ddd;text-align:center;">${produceDate}</td>
             <td style="padding:8px;border:1px solid #ddd;text-align:center;">${expireDate}</td>
             <td style="padding:8px;border:1px solid #ddd;text-align:right;">${formatMoney(batch.inRecords && batch.inRecords[0] ? batch.inRecords[0].in_price : 0)}</td>
-            <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#ff4d4f;">${batch.totalInNum}</td>
+            <td style="padding:8px;border:1px solid #ddd;text-align:center;font-weight:bold;color:#ff4d4f;">${batch.displayNum || batch.totalInNum}</td>
         </tr>
     `;
 });
@@ -944,7 +944,7 @@ async function toggleReturnBatch(index) {  // 🔥 加上 async
                 <span><strong>到期日期：</strong>${expireDisplay}</span>
                 <span><strong>入库单价：</strong>${formatMoney(selectedBatchData.inPrice)}</span>
                 // 计算原始入库数量（从 batch 中获取 totalInNum）
-const originalQty = batch.totalInNum || 0;
+const originalQty = batch.displayNum || batch.totalInNum || 0;
 <span><strong>批次库存：</strong><span style="color:#ff4d4f;font-weight:bold;">${originalQty}</span></span>
             </div>
         </div>

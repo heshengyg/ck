@@ -579,15 +579,17 @@ function getStockBatchList(supplier, goodsName) {
                 produce_date: inItem.produce_date,
                 expire_date: inItem.expire_date,
                 inRecords: [],
-                totalInNum: 0,
+                totalInNum: 0,        // ✅ 最小计量单位（克数），用于库存计算
+                displayNum: 0,         // ✅ 新增：原始入库数量（按规格单位显示）
                 batchRemain: 0
             };
         }
         batchMap[batchKey].inRecords.push(inItem);
-        // ✅ base_num 已经是最小计量单位，直接累加
+        // totalInNum 累加最小计量单位（克数）
         batchMap[batchKey].totalInNum += Number(inItem.base_num || inItem.in_num || 0);
+        // displayNum 累加原始入库数量（in_num）
+        batchMap[batchKey].displayNum += Number(inItem.in_num || 0);
     });
-
     Object.values(batchMap).forEach(batch => {
         let outTotal = 0;
         let returnTotal = 0;
