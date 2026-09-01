@@ -26,26 +26,6 @@ let outFilterData = {
     settleType: ['线上', '线下']
 };
 
-// ========== // ========== 分页相关 ==========
-// 使用 var 并检查是否已存在，避免重复声明
-if (typeof outCurrentPage === 'undefined') {
-    var outCurrentPage = 1;
-}
-if (typeof outPageSize === 'undefined') {
-    var outPageSize = 10;
-}
-if (typeof outTotalPages === 'undefined') {
-    var outTotalPages = 1;
-}
-if (typeof outSortField === 'undefined') {
-    var outSortField = '';
-}
-if (typeof outSortAsc === 'undefined') {
-    var outSortAsc = true;
-}
-if (typeof filteredStockOut === 'undefined') {
-    var filteredStockOut = [];
-}
 
 // ========== 刷新出库列表 ==========
 function refreshStockOut() {
@@ -1384,3 +1364,5 @@ document.addEventListener('click', function(e) {
 
 // 确保 resetOutSearch 也暴露到全局
 window.resetOutSearch = resetOutSearch;
+
+console.log('✅ stockout.js 加载完成');
