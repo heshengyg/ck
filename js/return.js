@@ -117,11 +117,23 @@ async function loadReturnGoods() {
         if (!res.ok) throw new Error('读取失败');
         const data = await res.json();
         allReturnGoods = data;
+        
+        // ✅ 新增：暴露到全局，供 common.js 的 getStockBatchList 使用
+        window.allReturnGoods = allReturnGoods;
+        console.log('✅ 退货数据已加载，共', allReturnGoods.length, '条');
+        
         initReturnFilterData();
         const totalEl = document.getElementById('returnTotalCount');
         if (totalEl) totalEl.textContent = data.length;
         returnCurrentPage = 1;
         filterReturnGoods();
+        
+        // ✅ 新增：刷新库存缓存，确保退货数据影响库存计算
+        if (typeof refreshAllStockCache === 'function') {
+            refreshAllStockCache(allStockIn, allStockOut);
+            console.log('✅ 库存缓存已刷新（含退货数据）');
+        }
+        
         setTimeout(function() {
             try {
                 initReturnPrintControls();
@@ -133,7 +145,6 @@ async function loadReturnGoods() {
         showMsg('加载退货记录失败：' + e.message);
     }
 }
-
 // ========== 初始化打印控件 ==========
 function initReturnPrintControls() {
     try {

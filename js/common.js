@@ -618,17 +618,18 @@ function getStockBatchList(supplier, goodsName) {
             }
         });
         
-        // ✅ 统计退货（使用 allReturnGoods 全局变量）
-        if (window.allReturnGoods && window.allReturnGoods.length > 0) {
-            window.allReturnGoods.forEach(returnItem => {
-                if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
-                    let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
-                    if (isInBatch) {
-                        returnTotal += Number(returnItem.return_num);
-                    }
-                }
-            });
+        // ✅ 统计退货（直接使用 allReturnGoods 全局变量）
+if (allReturnGoods && allReturnGoods.length > 0) {
+    allReturnGoods.forEach(returnItem => {
+        if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
+            // 检查退货记录是否属于当前批次
+            let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
+            if (isInBatch) {
+                returnTotal += Number(returnItem.return_num);
+            }
         }
+    });
+}
         
         // 计算批次剩余库存
         batch.batchRemain = Math.max(0, batch.totalInNum - outTotal - returnTotal);
