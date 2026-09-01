@@ -398,14 +398,23 @@ bindSpecs.forEach((bind, index) => {
         specSelect.appendChild(option);
     }
     
-    // 默认选中第一个
+// 默认选中第一个
 if (outCurrSpecOptions.length > 0) {
     specSelect.value = outCurrSpecOptions[0].specId;
     outSelectedSpecData = outCurrSpecOptions[0];
     document.getElementById('outSpec').value = outCurrSpecOptions[0].originalSpec || '';
     
-    // ✅ 先刷新库存缓存
-    refreshAllStockCache(allStockIn, allStockOut);
+    // ✅ 确保 allStockIn 和 allStockOut 已加载
+    if (!allStockIn || allStockIn.length === 0) {
+        await loadStockIn();
+    }
+    if (!allStockOut || allStockOut.length === 0) {
+        await loadStockOut();
+    }
+    // ✅ 刷新库存缓存
+    if (typeof refreshAllStockCache === 'function') {
+        refreshAllStockCache(allStockIn, allStockOut);
+    }
     
     // 更新总库存和销售价格
     updateTotalStockDisplay();
@@ -464,10 +473,53 @@ function updateTotalStockDisplay() {
         return;
     }
     
-    // ✅ 获取总库存（最小计量单位）- 从缓存中获取
-    const totalBaseUnit = getTotalStockNum(supplier, goodsName);
+    // ============================================================
+    // ✅ 直接计算总库存（最小计量单位）- 不依赖缓存
+    // ============================================================
+    let totalBaseUnit = 0;
     
-    console.log('📊 getTotalStockNum 返回:', totalBaseUnit);
+    if (allStockIn && allStockIn.length > 0) {
+        // 获取该商品的所有入库记录
+        const inRecords = allStockIn.filter(item => 
+            item.supplier === supplier && 
+            item.goodsName === goodsName
+        );
+        
+        console.log('📦 入库记录数量:', inRecords.length);
+        console.log('📦 入库记录:', inRecords);
+        
+        for (const record of inRecords) {
+            // 使用 base_num（最小计量单位数量），如果没有则使用 in_num
+            let stock = record.base_num || record.in_num || 0;
+            
+            // 减去已出库数量
+            if (allStockOut && allStockOut.length > 0) {
+                const outRecords = allStockOut.filter(out => 
+                    out.inRecordId === record.id && 
+                    out.goodsName === goodsName &&
+                    out.supplier === supplier
+                );
+                const totalOut = outRecords.reduce((sum, out) => sum + (out.outNum || 0), 0);
+                stock = stock - totalOut;
+            }
+            
+            // 减去退货数量
+            if (window.allReturnGoods && window.allReturnGoods.length > 0) {
+                const returnRecords = window.allReturnGoods.filter(ret => 
+                    ret.in_record_id === record.id
+                );
+                const totalReturn = returnRecords.reduce((sum, ret) => sum + (ret.return_num || 0), 0);
+                stock = stock - totalReturn;
+            }
+            
+            // 只累加正数
+            if (stock > 0) {
+                totalBaseUnit += stock;
+            }
+        }
+    }
+    
+    console.log('📊 直接计算总库存:', { supplier, goodsName, totalBaseUnit });
     
     // 如果总库存为0，显示0
     if (totalBaseUnit === 0) {
@@ -483,7 +535,7 @@ function updateTotalStockDisplay() {
     const specUnit = specData.specName || specData.unit || '个';
     const conversionRate = specData.conversion_rate || 1;
     
-    // ✅ 计算换算后的数量
+    // 计算换算后的数量
     const convertedQty = Math.floor(totalBaseUnit / conversionRate);
     const remainder = totalBaseUnit % conversionRate;
     
@@ -505,7 +557,7 @@ function updateTotalStockDisplay() {
     window._outBaseUnitStockQty = totalBaseUnit;
     window._outConversionRate = conversionRate;
     
-    console.log('总库存换算:', {
+    console.log('总库存换算显示:', {
         totalBaseUnit,
         conversionRate,
         convertedQty,
