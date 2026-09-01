@@ -1,23 +1,23 @@
 // ===================== 出库模块 - 纯业务函数 =====================
 let outCurrSupplierList = [];
 let outCurrGoodsList = [];
-let outCurrSpecOptions = [];      // 新增：当前商品的换算规格选项
-let outSelectedSpecData = null;   // 新增：当前选中的规格数据
+let outCurrSpecOptions = [];
+let outSelectedSpecData = null;
 
 // ========== 出库筛选数据 ==========
 let outFilterData = {
     supplier: [],
     goodsName: [],
-    settleType: ['线上', '线下']  // 结算方式固定
+    settleType: ['线上', '线下']
 };
 
-// ========== 分页相关 ==========
-let outCurrentPage = 1;
-let outPageSize = 10;
-let outTotalPages = 1;
-let outSortField = '';
-let outSortAsc = true;
-let filteredStockOut = [];
+// ========== 分页相关 - 使用 var 避免重复声明错误 ==========
+var outCurrentPage = 1;
+var outPageSize = 10;
+var outTotalPages = 1;
+var outSortField = '';
+var outSortAsc = true;
+var filteredStockOut = [];
 
 // ========== 刷新出库列表 ==========
 function refreshStockOut() {
