@@ -828,7 +828,7 @@ function updateReturnBatchList() {
     container.innerHTML = html;
 }
 // ========== 切换批次选择 ==========
-async function toggleReturnBatch(index) {  // 🔥 加上 async
+async function toggleReturnBatch(index) {
     const allBatches = window._returnBatchListData || [];
     if (index >= allBatches.length) {
         alert('批次数据异常');
@@ -853,18 +853,40 @@ async function toggleReturnBatch(index) {  // 🔥 加上 async
         return;
     }
     selectedBatchInRecordId = inRecord.id;
+    
+    // ✅ 计算换算比例
+    let convertRate = 1;
+    if (inRecord.unit_spec_id) {
+        const spec = unitSpecList.find(s => s.id == inRecord.unit_spec_id);
+        if (spec) {
+            convertRate = spec.convert_rate || 1;
+        }
+    }
+    
+    // ✅ 计算显示数量（原始数量）
+    let displayQty = 0;
+    if (batch.displayNum !== undefined && batch.displayNum !== null) {
+        displayQty = batch.displayNum;
+    } else if (batch.totalInNum > 0 && convertRate > 0) {
+        // 如果 displayNum 不存在，从 totalInNum 计算
+        displayQty = Math.round(batch.totalInNum / convertRate);
+    }
+    
     selectedBatchData = {
+       selectedBatchData = {
     inRecordId: inRecord.id,
     inPrice: inRecord.in_price || 0,
-    batchRemain: batch.batchRemain,      // ✅ 保留用于库存校验
-    totalInNum: batch.totalInNum || 0,   // ✅ 新增：用于显示
+    batchRemain: batch.batchRemain,
+    displayNum: batch.displayNum || 0,  // ✅ 从 batch 获取
+    totalInNum: batch.totalInNum || 0,
     produceDate: batch.produce_date || '',
     expireDate: batch.expire_date || ''
 };
+    
     document.getElementById('returnSupplierSearch').value = batch.supplier;
     document.getElementById('returnCurGoodsId').value = inRecord.id;
     
-    // ========== 🔥 修改1：规格显示入库规格名称 ==========
+    // 规格显示
     let specDisplay = '-';
     if (inRecord.unit_spec_id && unitSpecList) {
         const spec = unitSpecList.find(s => s.id == inRecord.unit_spec_id);
@@ -874,13 +896,11 @@ async function toggleReturnBatch(index) {  // 🔥 加上 async
         }
     }
     document.getElementById('returnSpec').value = specDisplay;
-    
     document.getElementById('returnSettleType').value = batch.settleType || '';
     
-    // ========== 🔥 修改2：销售单价从入库规格对应的 sale_price 获取（使用 async/await） ==========
+    // 获取销售单价...
     const goodsInfo = allGoods.find(g => g.supplier === batch.supplier && g.name === batch.goodsName);
     let finalPrice = 0;
-    
     if (goodsInfo) {
         let specSalePrice = null;
         if (inRecord.unit_spec_id) {
@@ -898,8 +918,7 @@ async function toggleReturnBatch(index) {  // 🔥 加上 async
         }
         finalPrice = specSalePrice !== null ? specSalePrice : (goodsInfo.sale_price || 0);
     }
-    
-    // 应用保质期状态价格
+    // 应用保质期状态价格...
     let finalDisplayPrice = finalPrice;
     if (goodsInfo) {
         let unitCode = "day";
@@ -931,32 +950,34 @@ async function toggleReturnBatch(index) {  // 🔥 加上 async
             console.warn('获取保质期状态价格失败:', e);
         }
     }
-    
     document.getElementById('returnSalePrice').value = formatMoney(finalDisplayPrice);
     window._returnSelectedPrice = finalDisplayPrice;
     
-    const displayQty = selectedBatchData.displayNum || 0;
-const totalGrams = selectedBatchData.batchRemain || 0;
-document.getElementById('returnSelectedBatchInfo').innerHTML = `
-    <div style="background:#f0f9f4;padding:12px;border-radius:4px;border-left:3px solid #52c41a;">
-        <div style="display:flex;gap:20px;flex-wrap:wrap;">
-            <span><strong>供应商：</strong>${batch.supplier}</span>
-            <span><strong>商品：</strong>${batch.goodsName}</span>
-            <span><strong>规格：</strong>${specDisplay}</span>
-            <span><strong>生产日期：</strong>${selectedBatchData.produceDate || '-'}</span>
-            <span><strong>到期日期：</strong>${selectedBatchData.expireDate || '-'}</span>
-            <span><strong>入库单价：</strong>${formatMoney(selectedBatchData.inPrice)}</span>
-            <span><strong>批次库存：</strong><span style="color:#ff4d4f;font-weight:bold;">${displayQty}</span></span>
+    const produceDisplay = selectedBatchData.produceDate || '-';
+    const expireDisplay = selectedBatchData.expireDate || '-';
+    
+    // ✅ 显示正确的批次库存
+    const displayQtyValue = selectedBatchData.displayNum || 0;
+    document.getElementById('returnSelectedBatchInfo').innerHTML = `
+        <div style="background:#f0f9f4;padding:12px;border-radius:4px;border-left:3px solid #52c41a;">
+            <div style="display:flex;gap:20px;flex-wrap:wrap;">
+                <span><strong>供应商：</strong>${batch.supplier}</span>
+                <span><strong>商品：</strong>${batch.goodsName}</span>
+                <span><strong>规格：</strong>${specDisplay}</span>
+                <span><strong>生产日期：</strong>${produceDisplay}</span>
+                <span><strong>到期日期：</strong>${expireDisplay}</span>
+                <span><strong>入库单价：</strong>${formatMoney(selectedBatchData.inPrice)}</span>
+                <span><strong>批次库存：</strong><span style="color:#ff4d4f;font-weight:bold;">${displayQtyValue}</span></span>
+            </div>
         </div>
-    </div>
-`;
+    `;
     document.getElementById('returnInPrice').value = formatMoney(selectedBatchData.inPrice);
     document.getElementById('returnBatchRemain').value = selectedBatchData.batchRemain;
-    document.getElementById('returnBatchRemainDisplay').textContent = selectedBatchData.batchRemain;
-    // 使用 totalInNum 作为最大可退货数量（原始入库数量）
-const maxQty = batch.totalInNum || 0;
-document.getElementById('returnNum').max = maxQty;
-document.getElementById('returnNum').placeholder = `最大可退 ${maxQty}`;
+    document.getElementById('returnBatchRemainDisplay').textContent = displayQtyValue;
+    
+    // ✅ 最大可退数量 = displayQtyValue（份数）
+    document.getElementById('returnNum').max = displayQtyValue;
+    document.getElementById('returnNum').placeholder = `最大可退 ${displayQtyValue}`;
     document.getElementById('returnNum').value = '';
     updateReturnBatchList();
     console.log('✅ 已选择批次:', selectedBatchInRecordId, selectedBatchData);
