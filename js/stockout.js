@@ -490,12 +490,7 @@ async function updateTotalStockDisplay() {
         return;
     }
     
-    // ✅ 先刷新缓存，确保数据最新
-    if (typeof refreshAllStockCache === 'function') {
-        refreshAllStockCache(allStockIn, allStockOut);
-    }
-    
-    // ✅ 直接从 getStockBatchList 计算总库存
+    // ✅ 直接从 getStockBatchList 计算，不依赖缓存
     const batchList = getStockBatchList(supplier, goodsName);
     let totalBaseUnit = 0;
     for (const batch of batchList) {

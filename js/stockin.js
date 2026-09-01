@@ -1787,50 +1787,37 @@ async function renderStockIn() {
             let baseUnitName = '';
             
             if (item.unit_spec_id && specMap[item.unit_spec_id]) {
-                const spec = specMap[item.unit_spec_id];
-                const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
-                if (baseItem) {
-                    baseUnitName = baseItem.unit_name;
-                    if (cache && cache.batchList && cache.batchList.length > 0) {
-                        const batch = cache.batchList.find(b => {
-                            if (!b || !b.inRecords) return false;
-                            return b.inRecords.some(inItem => inItem.id === item.id);
-                        });
-                        if (batch) {
-                            batchRemain = batch.batchRemain * spec.convert_rate;
-                        }
-                    }
-                }
-            } else {
+    const spec = specMap[item.unit_spec_id];
+    const baseItem = baseUnitList.find(b => b.id == spec.base_unit_id);
+    if (baseItem) {
+        baseUnitName = baseItem.unit_name;
+        if (cache && cache.batchList && cache.batchList.length > 0) {
+            const batch = cache.batchList.find(b => {
+                if (!b || !b.inRecords) return false;
+                return b.inRecords.some(inItem => inItem.id === item.id);
+            });
+            if (batch) {
+                // ✅ 修正：batch.batchRemain 已经是最小计量单位，不需要再乘以 convert_rate
+                batchRemain = batch.batchRemain;
+            }
+        }
+    }
+} else {
                 if (cache && cache.batchList && cache.batchList.length > 0) {
-                    const batch = cache.batchList.find(b => {
-                        if (!b || !b.inRecords) return false;
-                        return b.inRecords.some(inItem => inItem.id === item.id);
-                    });
-                    if (batch) {
-                        batchRemain = batch.batchRemain;
-                    }
-                }
-                const goods = goodsMap[item.goodsId];
-                if (goods && goods.base_unit_name) {
-                    baseUnitName = goods.base_unit_name;
-                }
-            }
-            
-            if (cache && cache.batchList && cache.batchList.length > 0) {
-                const batchList = cache.batchList;
-                batchList.forEach(batch => {
-                    if (!batch || !batch.inRecords) return;
-                    const firstRecord = batch.inRecords[0];
-                    if (firstRecord && firstRecord.unit_spec_id && specMap[firstRecord.unit_spec_id]) {
-                        const spec = specMap[firstRecord.unit_spec_id];
-                        const specRate = spec.convert_rate || 1;
-                        totalStock += batch.batchRemain * specRate;
-                    } else {
-                        totalStock += batch.batchRemain;
-                    }
-                });
-            }
+    const batchList = cache.batchList;
+    batchList.forEach(batch => {
+        if (!batch || !batch.inRecords) return;
+        const firstRecord = batch.inRecords[0];
+        if (firstRecord && firstRecord.unit_spec_id && specMap[firstRecord.unit_spec_id]) {
+            const spec = specMap[firstRecord.unit_spec_id];
+            const specRate = spec.convert_rate || 1;
+            // ✅ 修正：batch.batchRemain 已经是最小计量单位，不需要再乘以 specRate
+            totalStock += batch.batchRemain;
+        } else {
+            totalStock += batch.batchRemain;
+        }
+    });
+}
             
             if (totalStock === 0 && cacheKey) {
                 const allRecords = allStockIn.filter(record => 

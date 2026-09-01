@@ -249,9 +249,11 @@ function refreshAllStockCache(inList, outList) {
         const parts = key.split('|');
         const sup = parts[0];
         const gName = parts[1];
+        // ✅ 直接使用 getStockBatchList 的结果，不额外乘以 convert_rate
+        const batchList = getStockBatchList(sup, gName);
         stockDataCache.set(key, {
-            totalStock: getTotalStockNum(sup, gName),
-            batchList: getStockBatchList(sup, gName)
+            totalStock: batchList.reduce((sum, b) => sum + b.batchRemain, 0),
+            batchList: batchList
         });
     });
 }
@@ -558,17 +560,13 @@ document.addEventListener('DOMContentLoaded', function() {
  * 按【供应商+商品名+换算规格ID+生产日期/到期日期】合并批次库存
  */
 function getStockBatchList(supplier, goodsName) {
-    // 1. 筛选对应商品所有入库记录
     let inList = allStockIn.filter(item => 
         item.supplier === supplier && item.goodsName === goodsName
     );
 
-    // 2. 按批次合并
     let batchMap = {};
     inList.forEach(inItem => {
-        // ✅ 使用 unit_spec_id 作为规格标识
         let specId = inItem.unit_spec_id || 0;
-        // ✅ 批次key：供应商+商品名+换算规格ID+生产日期+到期日期（不含价格）
         let batchKey = `${inItem.supplier}_${inItem.goodsName}_${specId}_${inItem.produce_date || ''}_${inItem.expire_date || ''}`;
         
         if (!batchMap[batchKey]) {
@@ -586,16 +584,14 @@ function getStockBatchList(supplier, goodsName) {
             };
         }
         batchMap[batchKey].inRecords.push(inItem);
-        // ✅ 使用 base_num（最小计量单位）累加
+        // ✅ base_num 已经是最小计量单位，直接累加
         batchMap[batchKey].totalInNum += Number(inItem.base_num || inItem.in_num || 0);
     });
 
-    // 3. 统计每个批次已出库总量 + 已退货总量
     Object.values(batchMap).forEach(batch => {
         let outTotal = 0;
         let returnTotal = 0;
         
-        // 统计出库
         allStockOut.forEach(out => {
             if (out.supplier === supplier && out.goodsName === goodsName) {
                 if (out.outDetail) {
@@ -623,7 +619,6 @@ function getStockBatchList(supplier, goodsName) {
             }
         });
         
-        // ✅ 统计退货 - 使用全局 allReturnGoods
         if (allReturnGoods && allReturnGoods.length > 0) {
             allReturnGoods.forEach(returnItem => {
                 if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
@@ -635,14 +630,11 @@ function getStockBatchList(supplier, goodsName) {
             });
         }
         
-        // ✅ 计算批次剩余库存
         batch.batchRemain = Math.max(0, batch.totalInNum - outTotal - returnTotal);
     });
 
-    // 4. 过滤库存为0的批次
     let batchList = Object.values(batchMap).filter(b => b.batchRemain > 0);
 
-    // 排序
     batchList.sort((a, b) => {
         if (a.produce_date && b.produce_date) {
             let pdDiff = new Date(a.produce_date) - new Date(b.produce_date);
