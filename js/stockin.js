@@ -1293,17 +1293,14 @@ async function submitStockIn(){
 
 // 提交入库成功后
 if (res.status >= 200 && res.status < 300) {
-    let result = await res.json();
-    let newRecordId = result && result.length > 0 ? result[0].id : null;
-    
-    console.log('✅ 入库成功，记录ID:', newRecordId);
+    try { await res.json(); } catch {}
     
     // ✅ 入库成功后更新库存字段
     try {
         await updateStockFields(supplier, goodsName);
-        console.log('✅ 库存字段更新完成');
+        console.log('✅ updateStockFields 执行完成');
     } catch (e) {
-        console.error('更新库存字段失败:', e);
+        console.error('❌ updateStockFields 执行失败:', e);
     }
     
     // ✅ 入库成功后，更新 price_temp_state 表
@@ -1423,16 +1420,19 @@ async function updateStockFields(supplier, goodsName) {
         const encodedGoodsName = encodeURIComponent(goodsName);
         
         const inRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`, {
-            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+            headers: { 
+                apikey: SUPABASE_KEY, 
+                Authorization: `Bearer ${SUPABASE_KEY}` 
+            }
         });
         const allInRecords = await inRes.json();
         
         if (!allInRecords || allInRecords.length === 0) {
-            console.log('没有找到入库记录');
+            console.log('❌ 没有找到入库记录');
             return;
         }
         
-        console.log('📦 找到入库记录数量:', allInRecords.length);
+        console.log('📦 找到入库记录:', allInRecords);
         
         // 2. 获取该商品的所有出库记录
         const outRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_out?supplier=eq.${encodedSupplier}&goodsName=eq.${encodedGoodsName}`, {
@@ -1448,7 +1448,6 @@ async function updateStockFields(supplier, goodsName) {
         
         // 4. 计算每个批次的剩余库存和总库存
         let totalStockSum = 0;
-        const updatePromises = [];
         
         for (const record of allInRecords) {
             // 计算该批次已出库数量
@@ -1461,55 +1460,56 @@ async function updateStockFields(supplier, goodsName) {
                 .filter(ret => ret.in_record_id === record.id)
                 .reduce((sum, ret) => sum + (ret.return_num || 0), 0);
             
-            // 批次剩余库存（最小计量单位）
+            // ✅ 使用 base_num（最小计量单位），如果为 NULL 则使用 in_num
             const baseNum = record.base_num || record.in_num || 0;
             const batchRemain = Math.max(0, baseNum - outTotal - returnTotal);
             
             console.log(`📊 批次 ${record.id}: base_num=${baseNum}, out=${outTotal}, return=${returnTotal}, remain=${batchRemain}`);
             
-            // 更新该记录的 batch_stock 和 total_stock（先设置 total_stock 为 batchRemain，后面再统一更新）
-            updatePromises.push(
-                fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${record.id}`, {
-                    method: 'PATCH',
-                    headers: {
-                        apikey: SUPABASE_KEY,
-                        Authorization: `Bearer ${SUPABASE_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ 
-                        batch_stock: batchRemain,
-                        total_stock: 0  // 临时设置为0，后面统一更新
-                    })
-                })
-            );
+            // ✅ 更新该记录的 batch_stock
+            const updateRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${record.id}`, {
+                method: 'PATCH',
+                headers: {
+                    apikey: SUPABASE_KEY,
+                    Authorization: `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ batch_stock: batchRemain })
+            });
+            
+            if (updateRes.ok) {
+                console.log(`✅ 批次 ${record.id} batch_stock 更新为 ${batchRemain}`);
+            } else {
+                console.error(`❌ 批次 ${record.id} 更新失败:`, await updateRes.text());
+            }
             
             totalStockSum += batchRemain;
         }
         
-        // 等待所有批次更新完成
-        await Promise.all(updatePromises);
-        console.log('✅ 批次库存更新完成, 总库存:', totalStockSum);
+        console.log('📊 总库存:', totalStockSum);
         
-        // 5. 更新该商品所有记录的 total_stock（统一设置为总库存）
-        const totalUpdatePromises = [];
+        // 5. 更新该商品所有记录的 total_stock
         for (const record of allInRecords) {
-            totalUpdatePromises.push(
-                fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${record.id}`, {
-                    method: 'PATCH',
-                    headers: {
-                        apikey: SUPABASE_KEY,
-                        Authorization: `Bearer ${SUPABASE_KEY}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ total_stock: totalStockSum })
-                })
-            );
+            const updateRes = await fetch(`${SUPABASE_URL}/rest/v1/stock_in?id=eq.${record.id}`, {
+                method: 'PATCH',
+                headers: {
+                    apikey: SUPABASE_KEY,
+                    Authorization: `Bearer ${SUPABASE_KEY}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ total_stock: totalStockSum })
+            });
+            
+            if (updateRes.ok) {
+                console.log(`✅ 批次 ${record.id} total_stock 更新为 ${totalStockSum}`);
+            } else {
+                console.error(`❌ 批次 ${record.id} total_stock 更新失败:`, await updateRes.text());
+            }
         }
-        await Promise.all(totalUpdatePromises);
         
         console.log(`✅ 库存字段更新完成: 总库存=${totalStockSum}`);
     } catch (e) {
-        console.error('更新库存字段失败:', e);
+        console.error('❌ 更新库存字段失败:', e);
         throw e;
     }
 }
