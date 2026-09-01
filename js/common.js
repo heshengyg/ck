@@ -225,6 +225,8 @@ window.compressImage = compressImage;
 // 退货模块
 let allReturnGoods = [];
 let filteredReturnGoods = [];
+// ✅ 暴露到全局
+window.allReturnGoods = allReturnGoods;
 // 页面缓存：存储入库、出库已加载分页数据，切换不用重新请求
 let pageCache = {
     stockIn: { data: null, page: 1 },
@@ -238,16 +240,15 @@ let stockDataCache = new Map();
 function refreshAllStockCache(inList, outList) {
     stockDataCache.clear();
     const uniqueKeySet = new Set();
+    // ✅ 改为 supplier|goodsName，让 getStockBatchList 内部处理规格分组
     inList.forEach(item => {
-        // ✅ 使用 unit_spec_id 作为缓存key的一部分
-        const key = `${item.supplier}|${item.goodsName}|${item.unit_spec_id || 0}`;
+        const key = `${item.supplier}|${item.goodsName}`;
         uniqueKeySet.add(key);
     });
     uniqueKeySet.forEach(key => {
         const parts = key.split('|');
         const sup = parts[0];
         const gName = parts[1];
-        // 注意：这里不传 specId，getStockBatchList 内部会处理
         stockDataCache.set(key, {
             totalStock: getTotalStockNum(sup, gName),
             batchList: getStockBatchList(sup, gName)
@@ -555,10 +556,6 @@ document.addEventListener('DOMContentLoaded', function() {
 // ===================== 公共工具函数：库存计算（最终修复版） =====================
 /**
  * 按【供应商+商品名+换算规格ID+生产日期/到期日期】合并批次库存
- * 先进先出排序：生产日期早 > 到期日期早
- * 同生产/到期：按批次最早入库记录ID升序（先录入先出库）
- * ✅ 已包含退货计算
- * ✅ 规格使用 unit_spec_id（绑定换算规格ID）
  */
 function getStockBatchList(supplier, goodsName) {
     // 1. 筛选对应商品所有入库记录
@@ -566,20 +563,20 @@ function getStockBatchList(supplier, goodsName) {
         item.supplier === supplier && item.goodsName === goodsName
     );
 
-    // 2. 按批次合并（按供应商+商品名+换算规格ID+生产日期+到期日期分组）
+    // 2. 按批次合并
     let batchMap = {};
     inList.forEach(inItem => {
-        // ✅ 使用 unit_spec_id 作为规格标识，如果没有则用 0
+        // ✅ 使用 unit_spec_id 作为规格标识
         let specId = inItem.unit_spec_id || 0;
-        // ✅ 批次key：供应商+商品名+换算规格ID+生产日期+到期日期
+        // ✅ 批次key：供应商+商品名+换算规格ID+生产日期+到期日期（不含价格）
         let batchKey = `${inItem.supplier}_${inItem.goodsName}_${specId}_${inItem.produce_date || ''}_${inItem.expire_date || ''}`;
         
         if (!batchMap[batchKey]) {
             batchMap[batchKey] = {
                 supplier: inItem.supplier,
                 goodsName: inItem.goodsName,
-                unitSpecId: specId,              // ✅ 存储换算规格ID
-                spec: inItem.spec,                // 保留旧规格用于显示
+                unitSpecId: specId,
+                spec: inItem.spec,
                 settleType: inItem.settleType,
                 produce_date: inItem.produce_date,
                 expire_date: inItem.expire_date,
@@ -589,7 +586,8 @@ function getStockBatchList(supplier, goodsName) {
             };
         }
         batchMap[batchKey].inRecords.push(inItem);
-        batchMap[batchKey].totalInNum += Number(inItem.in_num);
+        // ✅ 使用 base_num（最小计量单位）累加
+        batchMap[batchKey].totalInNum += Number(inItem.base_num || inItem.in_num || 0);
     });
 
     // 3. 统计每个批次已出库总量 + 已退货总量
@@ -625,7 +623,7 @@ function getStockBatchList(supplier, goodsName) {
             }
         });
         
-        // 统计退货
+        // ✅ 统计退货 - 使用全局 allReturnGoods
         if (allReturnGoods && allReturnGoods.length > 0) {
             allReturnGoods.forEach(returnItem => {
                 if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
@@ -637,7 +635,7 @@ function getStockBatchList(supplier, goodsName) {
             });
         }
         
-        // 计算批次剩余库存
+        // ✅ 计算批次剩余库存
         batch.batchRemain = Math.max(0, batch.totalInNum - outTotal - returnTotal);
     });
 
