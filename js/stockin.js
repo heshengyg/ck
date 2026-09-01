@@ -2062,3 +2062,56 @@ document.addEventListener('click', function(e) {
         }
     });
 });
+// ============================================================
+// ✅ 暴露入库模块所有函数到 window 对象（供 HTML onclick 调用）
+// ============================================================
+(function exposeInFunctions() {
+    console.log('🔄 开始暴露出入库函数到全局...');
+    
+    const functions = {
+        openStockInForm: openStockInForm,
+        closeStockInForm: closeStockInForm,
+        submitStockIn: submitStockIn,
+        refreshStockIn: refreshStockIn,
+        loadStockIn: loadStockIn,
+        filterStockIn: filterStockIn,
+        inSortTable: inSortTable,
+        inGoToPage: inGoToPage,
+        inPrevPage: inPrevPage,
+        inNextPage: inNextPage,
+        changeInPageSize: changeInPageSize,
+        inToggleSelectAll: inToggleSelectAll,
+        deleteStockIn: deleteStockIn,
+        batchDeleteStockIn: batchDeleteStockIn,
+        clearInSort: clearInSort,
+        resetInSearch: resetInSearch,
+        showInFilterList: showInFilterList,
+        filterInFilterList: filterInFilterList,
+        onInFilterInput: onInFilterInput,
+        showSupList: showSupList,
+        filterSupplierList: filterSupplierList,
+        showGoodsList: showGoodsList,
+        filterGoodsList: filterGoodsList,
+        selectInGoods: selectInGoods,
+        onInUnitSpecChange: onInUnitSpecChange,
+        lockExpireDate: lockExpireDate,
+        lockProduceDate: lockProduceDate,
+        updateInPriceByDate: updateInPriceByDate,
+        downloadStockInTemplate: downloadStockInTemplate,
+        exportStockInExcel: exportStockInExcel,
+        importStockInExcel: importStockInExcel,
+        updateStockFields: updateStockFields,
+        updatePriceTempState: updatePriceTempState
+    };
+    
+    for (const [key, fn] of Object.entries(functions)) {
+        if (typeof fn === 'function') {
+            window[key] = fn;
+        } else {
+            console.warn(`⚠️ ${key} 不是函数，跳过`);
+        }
+    }
+    
+    console.log('✅ openStockInForm 类型:', typeof window.openStockInForm);
+    console.log('✅ 入库模块所有函数已暴露到全局');
+})();
