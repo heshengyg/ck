@@ -555,6 +555,7 @@ document.addEventListener('DOMContentLoaded', function() {
  * 按【供应商+商品名+规格+入库单价+生产日期/到期日期】合并批次库存
  * 先进先出排序：生产日期早 > 到期日期早
  * 同生产/到期：按批次最早入库记录ID升序（先录入先出库）
+ * ✅ 已包含退货计算
  */
 function getStockBatchList(supplier, goodsName) {
     // 1. 筛选对应商品所有入库记录
@@ -617,9 +618,9 @@ function getStockBatchList(supplier, goodsName) {
             }
         });
         
-        // ✅ 新增：统计退货
-        if (allReturnGoods && allReturnGoods.length > 0) {
-            allReturnGoods.forEach(returnItem => {
+        // ✅ 统计退货（使用 allReturnGoods 全局变量）
+        if (window.allReturnGoods && window.allReturnGoods.length > 0) {
+            window.allReturnGoods.forEach(returnItem => {
                 if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
                     let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
                     if (isInBatch) {
@@ -629,6 +630,7 @@ function getStockBatchList(supplier, goodsName) {
             });
         }
         
+        // 计算批次剩余库存
         batch.batchRemain = Math.max(0, batch.totalInNum - outTotal - returnTotal);
     });
 
@@ -656,7 +658,6 @@ function getStockBatchList(supplier, goodsName) {
 
     return batchList;
 }
-
 /**
  * 获取商品总可用库存
  */
@@ -664,7 +665,6 @@ function getTotalStockNum(supplier, goodsName) {
     let batchList = getStockBatchList(supplier, goodsName);
     return batchList.reduce((sum, item) => sum + item.batchRemain, 0);
 }
-
 /**
  * 执行出库扣减（按合并批次先进先出，同批次内按入库录入时间FIFO）
  * 规则：

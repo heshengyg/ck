@@ -490,14 +490,14 @@ async function updateTotalStockDisplay() {
         return;
     }
     
-    // ✅ 直接从 getStockBatchList 计算总库存
+    // ✅ 直接从 getStockBatchList 计算总库存（包含退货计算）
     const batchList = getStockBatchList(supplier, goodsName);
     let totalBaseUnit = 0;
     for (const batch of batchList) {
         totalBaseUnit += batch.batchRemain;
     }
     
-    console.log('📊 计算总库存:', totalBaseUnit);
+    console.log('📊 计算总库存（最小计量单位）:', totalBaseUnit);
     
     if (totalBaseUnit === 0) {
         document.getElementById('totalStockNum').value = '0';
@@ -507,10 +507,12 @@ async function updateTotalStockDisplay() {
         return;
     }
     
+    // 获取换算比例
     const baseUnit = specData.baseUnit || goodsItem.base_unit || '个';
     const specUnit = specData.specName || specData.unit || '个';
     const conversionRate = specData.conversion_rate || 1;
     
+    // 计算换算后的数量
     const convertedQty = Math.floor(totalBaseUnit / conversionRate);
     const remainder = totalBaseUnit % conversionRate;
     
@@ -527,6 +529,7 @@ async function updateTotalStockDisplay() {
     
     document.getElementById('totalStockNum').value = displayText;
     
+    // 存储换算后的数量用于出库判断
     window._outConvertedStockQty = convertedQty;
     window._outBaseUnitStockQty = totalBaseUnit;
     window._outConversionRate = conversionRate;
@@ -536,7 +539,9 @@ async function updateTotalStockDisplay() {
         conversionRate,
         convertedQty,
         remainder,
-        displayText
+        displayText,
+        baseUnit,
+        specUnit
     });
 }
 // ========== 根据规格获取价格 ==========
