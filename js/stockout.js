@@ -1316,9 +1316,46 @@ window.resetOutSearch = resetOutSearch;
     try {
         await loadGoodsUnitBind();
         await loadUnitSpecs();
-        await loadAllBaseUnits();  // ✅ 新增
+        await loadAllBaseUnits();
         console.log('出库模块规格数据初始化完成');
     } catch (e) {
         console.warn('换算规格数据加载失败（不影响主要功能）：', e);
     }
 })();
+
+// ============================================================
+// ✅ 暴露函数到全局（修复 onclick 找不到函数的问题）
+// ============================================================
+window.openStockOutForm = openStockOutForm;
+window.closeStockOutForm = closeStockOutForm;
+window.submitStockOut = submitStockOut;
+window.selectOutGoods = selectOutGoods;
+window.onOutSpecChange = onOutSpecChange;
+window.checkStockNum = checkStockNum;
+window.showOutSupList = showOutSupList;
+window.filterOutSupList = filterOutSupList;
+window.showOutGoodsList = showOutGoodsList;
+window.filterOutGoodsList = filterOutGoodsList;
+window.deleteStockOut = deleteStockOut;
+window.batchDeleteStockOut = batchDeleteStockOut;
+window.refreshStockOut = refreshStockOut;
+window.resetOutSearch = resetOutSearch;
+window.exportStockOutExcel = exportStockOutExcel;
+window.downloadStockOutTemplate = downloadStockOutTemplate;
+window.loadOutGoodsBySupplier = loadOutGoodsBySupplier;
+window.renderOutSupList = renderOutSupList;
+window.renderOutGoodsList = renderOutGoodsList;
+window.renderStockOut = renderStockOut;
+window.filterStockOut = filterStockOut;
+window.outGoToPage = outGoToPage;
+window.outPrevPage = outPrevPage;
+window.outNextPage = outNextPage;
+window.changeOutPageSize = changeOutPageSize;
+window.outToggleSelectAll = outToggleSelectAll;
+window.outSortTable = outSortTable;
+window.clearOutSort = clearOutSort;
+window.showOutFilterList = showOutFilterList;
+window.filterOutFilterList = filterOutFilterList;
+window.onOutFilterInput = onOutFilterInput;
+
+console.log('✅ 出库模块所有函数已暴露到全局');
