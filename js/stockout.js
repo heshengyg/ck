@@ -399,15 +399,18 @@ bindSpecs.forEach((bind, index) => {
     }
     
     // 默认选中第一个
-    if (outCurrSpecOptions.length > 0) {
-        specSelect.value = outCurrSpecOptions[0].specId;
-        outSelectedSpecData = outCurrSpecOptions[0];
-        document.getElementById('outSpec').value = outCurrSpecOptions[0].originalSpec || '';
-        
-        // 更新总库存和销售价格
-        updateTotalStockDisplay();
-        updateSalePrice();
-    }
+if (outCurrSpecOptions.length > 0) {
+    specSelect.value = outCurrSpecOptions[0].specId;
+    outSelectedSpecData = outCurrSpecOptions[0];
+    document.getElementById('outSpec').value = outCurrSpecOptions[0].originalSpec || '';
+    
+    // ✅ 先刷新库存缓存
+    refreshAllStockCache(allStockIn, allStockOut);
+    
+    // 更新总库存和销售价格
+    updateTotalStockDisplay();
+    updateSalePrice();
+}
 }
 // ========== 换算规格变更处理 ==========
 function onOutSpecChange() {
@@ -461,13 +464,26 @@ function updateTotalStockDisplay() {
         return;
     }
     
+    // ✅ 获取总库存（最小计量单位）- 从缓存中获取
     const totalBaseUnit = getTotalStockNum(supplier, goodsName);
     
-    // ✅ 修复：使用 specData 中存储的 baseUnit
+    console.log('📊 getTotalStockNum 返回:', totalBaseUnit);
+    
+    // 如果总库存为0，显示0
+    if (totalBaseUnit === 0) {
+        document.getElementById('totalStockNum').value = '0';
+        window._outConvertedStockQty = 0;
+        window._outBaseUnitStockQty = 0;
+        window._outConversionRate = 1;
+        return;
+    }
+    
+    // 获取换算比例
     const baseUnit = specData.baseUnit || goodsItem.base_unit || '个';
     const specUnit = specData.specName || specData.unit || '个';
     const conversionRate = specData.conversion_rate || 1;
     
+    // ✅ 计算换算后的数量
     const convertedQty = Math.floor(totalBaseUnit / conversionRate);
     const remainder = totalBaseUnit % conversionRate;
     
@@ -484,6 +500,7 @@ function updateTotalStockDisplay() {
     
     document.getElementById('totalStockNum').value = displayText;
     
+    // 存储换算后的数量用于出库判断
     window._outConvertedStockQty = convertedQty;
     window._outBaseUnitStockQty = totalBaseUnit;
     window._outConversionRate = conversionRate;
@@ -495,8 +512,7 @@ function updateTotalStockDisplay() {
         remainder,
         displayText,
         baseUnit,
-        specUnit,
-        specData
+        specUnit
     });
 }
 // ========== 更新销售价格 ==========
@@ -675,7 +691,6 @@ function checkStockNum(){
     const selectedSpec = outSelectedSpecData;
     
     if (!selectedSpec) {
-        // 如果没有选择规格，提示
         return;
     }
     
@@ -689,7 +704,7 @@ function checkStockNum(){
         return;
     }
     
-    if(outNum > convertedQty && convertedQty > 0){
+    if (outNum > convertedQty && convertedQty > 0) {
         alert(`库存不足！当前可用库存：${totalDisplay}`);
         document.getElementById('outNum').value = convertedQty;
     }
@@ -833,22 +848,25 @@ async function submitStockOut(){
     // ============================================================
 
     // ✅ 验证库存（按换算规格）
-    const convertedQty = window._outConvertedStockQty || 0;
-    const baseQty = window._outBaseUnitStockQty || 0;
-    const conversionRate = window._outConversionRate || 1;
-    
-    if (outNum > convertedQty) {
-        const totalDisplay = document.getElementById('totalStockNum').value;
-        return alert(`库存不足！当前可用库存：${totalDisplay}`);
-    }
-    
-    // 计算实际出库的最小计量单位数量
-    const actualOutBaseQty = outNum * conversionRate;
-    
-    // 检查最小计量单位库存是否足够
-    if (actualOutBaseQty > baseQty) {
-        return alert(`库存不足！当前可用库存（最小计量单位）：${baseQty}`);
-    }
+    // ✅ 验证库存（按换算规格）
+const convertedQty = window._outConvertedStockQty || 0;
+const baseQty = window._outBaseUnitStockQty || 0;
+const conversionRate = window._outConversionRate || 1;
+
+console.log('库存校验:', { outNum, convertedQty, baseQty, conversionRate });
+
+if (outNum > convertedQty) {
+    const totalDisplay = document.getElementById('totalStockNum').value;
+    return alert(`库存不足！当前可用库存：${totalDisplay}`);
+}
+
+// 计算实际出库的最小计量单位数量
+const actualOutBaseQty = outNum * conversionRate;
+
+// 检查最小计量单位库存是否足够
+if (actualOutBaseQty > baseQty) {
+    return alert(`库存不足！当前可用库存（最小计量单位）：${baseQty}`);
+}
     
     // ========== FIFO出库 ==========
     const outDetail = calcFIFOOut(supplier, goodsName, actualOutBaseQty);
