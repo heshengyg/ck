@@ -869,20 +869,18 @@ async function updateStockFieldsAfterOut(supplier, goodsName) {
     }
 }
 
-// ========== 提交出库 ==========
+// ========== 提交出库（最终精准修正版） ==========
 async function submitStockOut() {
     let supplier = document.getElementById('outSupSearchInput').value.trim();
     let goodsName = document.getElementById('outGoodsSearchInput').value.trim();
     let spec = document.getElementById('outSpec').value || ''; 
     let settleType = document.getElementById('outSettleType').value || '';
-    let outType = document.getElementById('outType').value || '';
     let salePriceText = document.getElementById('outSalePrice').value;
     let salePrice = parseFloat(salePriceText.replace(/[￥,¥]/g, '')) || 0;
     let outNum = Number(document.getElementById('outNum').value) || 0; 
     let recordDate = document.getElementById('outRecordDate').value;
     
     // 基础校验
-    if (!outType) return alert('请选择出库类型');
     if (!supplier) return alert('请选择供应商');
     if (!goodsName) return alert('请选择商品');
     if (!document.getElementById('outSpecSelect').value) return alert('请选择换算规格');
@@ -927,31 +925,26 @@ async function submitStockOut() {
     }
     let saleAmount = Number((finalSalePrice * outNum).toFixed(2));
     
-    // ✅ 严格按照数据库截图中的【驼峰命名】构造数据！
+    // ✅ 严格只发送 stock_out 表真实存在的字段（全部为驼峰命名）
     let postData = {
-        supplier: supplier,
-        goodsName: goodsName,               // 表字段: goodsName
-        spec: outSelectedSpecData?.specName || spec, // 表字段: spec (为字符串类型)
-        settleType: settleType,             // 表字段: settleType
-        outType: outType,                   // 必须确保你的 stock_out 表有这个字段！（截图中未显示，如果截图中没有，这里不要传，否则也报400）
-        outPrice: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0, // 表字段: outPrice
-        salePrice: finalSalePrice,          // 表字段: salePrice
-        outNum: actualOutBaseQty,           // 表字段: outNum
-        outAmount: totalOutAmount,          // 表字段: outAmount
-        saleAmount: saleAmount,             // 表字段: saleAmount
-        recordDate: recordDate,             // 表字段: recordDate
-        inRecordId: outDetail[0].inRecordId, // 表字段: inRecordId
-        outDetail: detailStr,               // 表字段: outDetail (为 JSON 类型)
+        supplier: supplier,                          // 存在
+        goodsName: goodsName,                        // 存在
+        spec: outSelectedSpecData?.specName || spec, // 存在
+        settleType: settleType,                      // 存在
+        outPrice: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0, // 存在
+        salePrice: finalSalePrice,                   // 存在
+        outNum: actualOutBaseQty,                    // 存在
+        outAmount: totalOutAmount,                   // 存在
+        saleAmount: saleAmount,                      // 存在
+        recordDate: recordDate,                      // 存在
+        inRecordId: outDetail[0].inRecordId,         // 存在
+        outDetail: detailStr,                        // 存在
         
-        // 下面这些字段如果数据库里【没有】，请注释掉，否则会报 400！
-        // 但为了满足你说的“显示规格3”，建议你在 Supabase 里加个列：conversionUnit (text)
-        conversionUnit: outSelectedSpecData?.specName || outSelectedSpecData?.unit || '', 
-        conversionRate: outSelectedSpecData?.conversion_rate || 1,
-        displayOutNum: outNum
+        // ✅ 严格使用新加的列名（蛇形命名），用于记录你所选的“规格3”和数量
+        conversion_unit: outSelectedSpecData?.specName || outSelectedSpecData?.unit || '', 
+        conversion_rate: outSelectedSpecData?.conversion_rate || 1,
+        display_out_num: outNum 
     };
-
-    // ⚠️ 数据库截图里没有 outType，如果 400 报错，说明这个字段不存在，请将其从 postData 中删除：
-    // delete postData.outType; 
     
     try {
         let res = await fetch(`${SUPABASE_URL}/rest/v1/stock_out`, {
@@ -1085,9 +1078,9 @@ function renderStockOut() {
     tb.innerHTML = '';
     
     pageData.forEach((item, idx) => {
-        // 显示：出库所选规格名称（规格3）
+        // 优先读取新加的 conversion_unit 字段，否则回退读取旧的 spec
         let specDisplay = item.conversion_unit || item.spec || '-';
-        // 显示：实际出库的份数
+        // 显示实际出库的份数，如果旧数据没有 display_out_num，则回退计算
         let displayNum = item.display_out_num || Math.floor(Number(item.outNum || 0) / (Number(item.conversion_rate || 1)));
         
         let html = `
@@ -1096,11 +1089,11 @@ function renderStockOut() {
                 <td>${start + idx + 1}</td>
                 <td>${item.supplier || ''}</td>
                 <td>${item.goodsName || ''}</td>
-                <td>${specDisplay}</td>
+                <td>${specDisplay}</td> <!-- 显示所选的“规格3” -->
                 <td>${item.settleType || ''}</td>
                 <td>${formatMoney(item.outPrice)}</td>
                 <td>${formatMoney(item.salePrice)}</td>
-                <td>${displayNum}</td>
+                <td>${displayNum}</td> <!-- 显示实际出库的“5份” -->
                 <td>${formatMoney(item.outAmount)}</td>
                 <td>${formatMoney(item.saleAmount)}</td>
                 <td>${item.recordDate || ''}</td>
