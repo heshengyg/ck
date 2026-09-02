@@ -881,7 +881,7 @@ async function submitStockOut() {
     let outNum = Number(document.getElementById('outNum').value) || 0; 
     let recordDate = document.getElementById('outRecordDate').value;
     
-    // 基础校验...
+    // 基础校验
     if (!outType) return alert('请选择出库类型');
     if (!supplier) return alert('请选择供应商');
     if (!goodsName) return alert('请选择商品');
@@ -928,36 +928,48 @@ async function submitStockOut() {
     let saleAmount = Number((finalSalePrice * outNum).toFixed(2));
     
     // ✅ 关键：创建单条出库汇总记录
+    // ⚠️ 注意：这里 100% 使用了数据库常用的 snake_case（下划线命名）
     let postData = {
         supplier: supplier,
-        goodsName: goodsName,
-        spec: outSelectedSpecData?.specName || spec, // 记录所选【出库规格】
-        settleType: settleType,
-        outType: outType,
-        outPrice: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0,
-        salePrice: finalSalePrice,
-        outNum: actualOutBaseQty, // 记录总扣减克数
-        outAmount: totalOutAmount,
-        saleAmount: saleAmount,
-        recordDate: recordDate,
-        inRecordId: outDetail[0].inRecordId, 
-        outDetail: detailStr, // 记录扣减了哪些具体批次
+        goods_name: goodsName,
+        spec: outSelectedSpecData?.specName || spec,
+        settle_type: settleType,
+        out_type: outType,
+        out_price: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0,
+        sale_price: finalSalePrice,
+        out_num: actualOutBaseQty, 
+        out_amount: totalOutAmount,
+        sale_amount: saleAmount,
+        record_date: recordDate,
+        in_record_id: outDetail[0].inRecordId, 
+        out_detail: detailStr,
         conversion_spec: document.getElementById('outSpecSelect').value,
-        conversion_unit: outSelectedSpecData?.specName || outSelectedSpecData?.unit || '', // 记录【出库规格名】
+        conversion_unit: outSelectedSpecData?.specName || outSelectedSpecData?.unit || '',
         conversion_rate: outSelectedSpecData?.conversion_rate || 1,
-        display_out_num: outNum // 记录出库份数
+        display_out_num: outNum
     };
     
     try {
         let res = await fetch(`${SUPABASE_URL}/rest/v1/stock_out`, {
             method: 'POST',
             headers: {
-                apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json', 'Prefer': 'return=representation'
+                apikey: SUPABASE_KEY, 
+                Authorization: `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json', 
+                'Prefer': 'return=representation'
             },
             body: JSON.stringify(postData)
         });
-        if (!res.ok) return showMsg('出库提交失败，请检查数据');
+        
+        // 增加错误日志输出，便于定位 404 原因
+        if (!res.ok) {
+            console.error('出库提交失败，错误响应:', res.status, res.statusText);
+            try {
+                const errData = await res.json();
+                console.error('服务器返回的错误详情:', errData);
+            } catch(e) {}
+            return showMsg('出库提交失败，请检查数据（请求状态码：' + res.status + '）');
+        }
         
         showMsg('出库提交成功');
         try { await updateStockFieldsAfterOut(supplier, goodsName); } catch (e) {}
