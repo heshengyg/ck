@@ -1295,14 +1295,7 @@ async function submitStockIn(){
 if (res.status >= 200 && res.status < 300) {
     try { await res.json(); } catch {}
     
-    // ✅ 必须等待数据库字段更新完毕，然后再刷新前端，防止读到旧值
-    try {
-        await updateStockFields(supplier, goodsName);
-        console.log('✅ updateStockFields 执行完成');
-    } catch (e) {
-        console.error('❌ updateStockFields 执行失败:', e);
-    }
-    
+    // 更新价格状态（不影响库存主逻辑）
     try {
         await updatePriceTempState(goodsId, unitSpecId, salePrice);
     } catch (e) {
@@ -1312,7 +1305,7 @@ if (res.status >= 200 && res.status < 300) {
     showMsg(editId ? '编辑成功' : '入库成功');
     closeStockInForm();
     
-    // ✅ 强制清空缓存，确保 loadStockIn 拿到的是新鲜的 batch_stock
+    // ✅ 核心：必须强制清空缓存，然后再重新拉取最新数据刷新
     stockDataCache.clear();
     await loadStockIn();
     
@@ -1781,10 +1774,10 @@ async function renderStockIn() {
                 if (baseItem) baseUnitName = baseItem.unit_name; // 比如 "克"
             }
 
-            // 从正确计算后的缓存中取数据
+                        // 从正确计算后的缓存中取数据
             if (cache && cache.batchList && cache.batchList.length > 0) {
                 cache.batchList.forEach(batch => {
-                    // ✅ 直接累加批次剩余克数
+                    // ✅ 直接累加计算出的批次剩余克数（不再依赖 DB 的 batch_stock）
                     totalStock += batch.batchRemain; 
 
                     // 匹配当前入库记录的批次，直接取克数

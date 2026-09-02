@@ -240,7 +240,7 @@ let stockDataCache = new Map();
 function refreshAllStockCache(inList, outList) {
     stockDataCache.clear();
     const uniqueKeySet = new Set();
-    // ✅ 改为 supplier|goodsName，让 getStockBatchList 内部处理规格分组
+    // ✅ 按照供应商|商品名分组
     inList.forEach(item => {
         const key = `${item.supplier}|${item.goodsName}`;
         uniqueKeySet.add(key);
@@ -249,7 +249,7 @@ function refreshAllStockCache(inList, outList) {
         const parts = key.split('|');
         const sup = parts[0];
         const gName = parts[1];
-        // ✅ 直接使用 getStockBatchList 的结果，不额外乘以 convert_rate
+        // ✅ 直接使用 getStockBatchList 的结果，全量实时计算不靠缓存脏数据
         const batchList = getStockBatchList(sup, gName);
         stockDataCache.set(key, {
             totalStock: batchList.reduce((sum, b) => sum + b.batchRemain, 0),
@@ -257,7 +257,6 @@ function refreshAllStockCache(inList, outList) {
         });
     });
 }
-
 // 商品模块
 let allGoods = [];
 let filteredGoods = [];
@@ -558,7 +557,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // ===================== 公共工具函数：库存计算（最终修复版） =====================
 /**
  * 按【供应商+商品名+入库规格ID+日期】严格区分批次。
- * 修复致命Bug：新入库同批次时，不会被旧批次扣减为0的数据覆盖。
+ * 终极修复：不再依赖数据库的 batch_stock 残留值，全部通过前端全量计算得出真实库存。
  */
 function getStockBatchList(supplier, goodsName) {
     let inList = allStockIn.filter(item => 
@@ -568,6 +567,7 @@ function getStockBatchList(supplier, goodsName) {
     let batchMap = {};
     inList.forEach(inItem => {
         let specId = inItem.unit_spec_id || 0; 
+        // Key 必须包含入库规格ID和日期，这是不变的
         let batchKey = `${inItem.supplier}_${inItem.goodsName}_${specId}_${inItem.produce_date || ''}_${inItem.expire_date || ''}`;
         
         if (!batchMap[batchKey]) {
@@ -580,13 +580,13 @@ function getStockBatchList(supplier, goodsName) {
                 produce_date: inItem.produce_date,
                 expire_date: inItem.expire_date,
                 inRecords: [],
-                totalInNum: 0, 
-                batchRemain: 0 
+                totalInNum: 0, // 基础单位总数（克）
+                batchRemain: 0 // 剩余基础单位总数（克）
             };
         }
         batchMap[batchKey].inRecords.push(inItem);
         
-        // 仅为了记录原始入库基数
+        // 强制计算基础单位
         let baseNum = inItem.base_num;
         if (!baseNum || isNaN(baseNum)) {
             let spec = unitSpecList.find(s => s.id == specId);
@@ -594,65 +594,65 @@ function getStockBatchList(supplier, goodsName) {
             baseNum = Number(inItem.in_num || 0) * rate;
         }
         batchMap[batchKey].totalInNum += Number(baseNum);
-        
-        // ✅✅ 核心修复：绝对信任数据库已经算好的 batch_stock
-        // 无论它是 0 还是正数，都代表真实的库存，如果为0，代表彻底卖完了。
-        let dbStock = Number(inItem.batch_stock || 0);
-        if (dbStock >= 0) {
-            batchMap[batchKey].batchRemain += dbStock;
-        }
     });
 
-    // ✅ 兜底方案（只在数据库完全没有 batch_stock 旧数据时才走这里）
     Object.values(batchMap).forEach(batch => {
-        // 如果数据库里明确存了 0，或者已经算了正数，就不需要前端干预了
-        let hasValidDbStock = batch.inRecords.some(item => item.batch_stock !== null && item.batch_stock !== undefined);
+        let outTotal = 0;
+        let returnTotal = 0;
+        let currentBaseNum = 0;
         
-        if (!hasValidDbStock) {
-            let outTotal = 0;
-            let returnTotal = 0;
-            let currentBaseNum = 0;
-            if (batch.inRecords && batch.inRecords.length > 0) {
-                let record = batch.inRecords[0];
-                currentBaseNum = record.base_num || (Number(record.in_num || 0) * (unitSpecList.find(s => s.id == record.unit_spec_id)?.convert_rate || 1));
+        // 获取当前批次的原始入库克数
+        if (batch.inRecords && batch.inRecords.length > 0) {
+             let record = batch.inRecords[0];
+             currentBaseNum = record.base_num || (Number(record.in_num || 0) * (unitSpecList.find(s => s.id == record.unit_spec_id)?.convert_rate || 1));
+        }
+        
+        // 统计出库（克数） - 确保这里也是精确匹配
+        allStockOut.forEach(out => {
+            if (out.supplier === supplier && out.goodsName === goodsName) {
+                if (out.outDetail) {
+                    try {
+                        let detailList = typeof out.outDetail === 'string' 
+                            ? JSON.parse(out.outDetail) 
+                            : out.outDetail;
+                        if (Array.isArray(detailList)) {
+                            detailList.forEach(detail => {
+                                let isInBatch = batch.inRecords.some(inItem => inItem.id === detail.inRecordId);
+                                if (isInBatch) {
+                                    outTotal += Number(detail.useNum || 0);
+                                }
+                            });
+                        }
+                    } catch (e) {}
+                } else if (out.inRecordId) {
+                    let isInBatch = batch.inRecords.some(inItem => inItem.id === out.inRecordId);
+                    if (isInBatch) {
+                        outTotal += Number(out.outNum || 0);
+                    }
+                }
             }
-            
-            allStockOut.forEach(out => {
-                if (out.supplier === supplier && out.goodsName === goodsName) {
-                    if (out.outDetail) {
-                        try {
-                            let detailList = typeof out.outDetail === 'string' ? JSON.parse(out.outDetail) : out.outDetail;
-                            if (Array.isArray(detailList)) {
-                                detailList.forEach(detail => {
-                                    let isInBatch = batch.inRecords.some(inItem => inItem.id === detail.inRecordId);
-                                    if (isInBatch) outTotal += Number(detail.useNum || 0);
-                                });
-                            }
-                        } catch (e) {}
-                    } else if (out.inRecordId) {
-                        let isInBatch = batch.inRecords.some(inItem => inItem.id === out.inRecordId);
-                        if (isInBatch) outTotal += Number(out.outNum || 0);
+        });
+        
+        // 统计退货（克数）
+        if (allReturnGoods && allReturnGoods.length > 0) {
+            allReturnGoods.forEach(returnItem => {
+                if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
+                    let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
+                    if (isInBatch) {
+                        let specId = batch.unitSpecId;
+                        let spec = unitSpecList.find(s => s.id == specId);
+                        let rate = spec ? (spec.convert_rate || 1) : 1;
+                        // 假设 return_num 是份数，乘以 rate 换算成克
+                        returnTotal += (Number(returnItem.return_num || 0) * rate);
                     }
                 }
             });
-            
-            if (allReturnGoods && allReturnGoods.length > 0) {
-                allReturnGoods.forEach(returnItem => {
-                    if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
-                        let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
-                        if (isInBatch) {
-                            let specId = batch.unitSpecId;
-                            let spec = unitSpecList.find(s => s.id == specId);
-                            let rate = spec ? (spec.convert_rate || 1) : 1;
-                            returnTotal += (Number(returnItem.return_num || 0) * rate);
-                        }
-                    }
-                });
-            }
-            batch.batchRemain = Math.max(0, currentBaseNum - outTotal - returnTotal);
         }
+
+        // ✅ 最终核心计算：当前批次总克数 - 出库克数 - 退货克数
+        batch.batchRemain = Math.max(0, currentBaseNum - outTotal - returnTotal);
         
-        // 计算显示数量
+        // 计算显示数量（份/袋）
         const firstRecord = batch.inRecords[0];
         let convertRate = 1;
         if (firstRecord && firstRecord.unit_spec_id) {
@@ -663,7 +663,6 @@ function getStockBatchList(supplier, goodsName) {
         if (batch.displayNum < 0) batch.displayNum = 0;
     });
 
-    // 过滤掉库存为0的
     let batchList = Object.values(batchMap).filter(b => b.batchRemain > 0);
 
     batchList.sort((a, b) => {
