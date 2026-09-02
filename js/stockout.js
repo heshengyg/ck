@@ -869,32 +869,29 @@ async function updateStockFieldsAfterOut(supplier, goodsName) {
     }
 }
 
-// ========== 提交出库（最终精准修正版） ==========
+// ========== 提交出库（修正版：支持平台销售/报损/赠送） ==========
 async function submitStockOut() {
     let supplier = document.getElementById('outSupSearchInput').value.trim();
     let goodsName = document.getElementById('outGoodsSearchInput').value.trim();
     let spec = document.getElementById('outSpec').value || ''; 
     let settleType = document.getElementById('outSettleType').value || '';
+    let outType = document.getElementById('outType').value || ''; // 出库类型
     let salePriceText = document.getElementById('outSalePrice').value;
     let salePrice = parseFloat(salePriceText.replace(/[￥,¥]/g, '')) || 0;
     let outNum = Number(document.getElementById('outNum').value) || 0; 
     let recordDate = document.getElementById('outRecordDate').value;
     
     // 基础校验
+    if (!outType) return alert('请选择出库类型');
     if (!supplier) return alert('请选择供应商');
     if (!goodsName) return alert('请选择商品');
     if (!document.getElementById('outSpecSelect').value) return alert('请选择换算规格');
     if (outNum < 1) return alert('出库数量必须大于0');
     if (!recordDate) return alert('请选择录入日期');
-    
+
+    // 库存逻辑校验（报损/赠送也需要消耗库存）
     const bzStatus = window._outSelectedBzStatus || '';
     if (bzStatus === '过期') return alert('⚠️ 当前商品已过期，请做退货处理！');
-    
-    const priceValue = document.getElementById('outSalePrice').value || '';
-    const isPriceEmpty = !priceValue || priceValue === '' || priceValue === '￥0.00' || priceValue === '￥' || priceValue === '￥0' || priceValue.trim() === '' || priceValue === '价格未录入' || priceValue.includes('请选择') || priceValue.includes('未录入');
-    
-    const finalSalePrice = window._outSelectedSalePrice !== null && window._outSelectedSalePrice !== undefined ? window._outSelectedSalePrice : salePrice;
-    if (isPriceEmpty || finalSalePrice === null || finalSalePrice === 0 || finalSalePrice === undefined) return alert('请提醒商品部人员录入价格！');
     
     const convertedQty = window._outConvertedStockQty || 0;
     const baseQty = window._outBaseUnitStockQty || 0;
@@ -909,7 +906,7 @@ async function submitStockOut() {
     if (outDetail.length === 0) return alert('无可用库存批次');
     let detailStr = JSON.stringify(outDetail);
     
-    // 计算总出库金额
+    // 计算总出库成本（无论何种类型，成本必须产生）
     let totalOutAmount = 0;
     let goodsItem = allGoods.find(g => g.name === goodsName && g.supplier === supplier);
     if (settleType === '线上') {
@@ -923,24 +920,44 @@ async function submitStockOut() {
         });
         totalOutAmount = Number(totalInPriceSum.toFixed(2));
     }
-    let saleAmount = Number((finalSalePrice * outNum).toFixed(2));
+
+    // ====== 核心修改：根据出库类型判定销售金额 ======
+    let finalSalePrice = salePrice;
+    let saleAmount = 0;
     
-    // ✅ 严格只发送 stock_out 表真实存在的字段（全部为驼峰命名）
-    let postData = {
-        supplier: supplier,                          // 存在
-        goodsName: goodsName,                        // 存在
-        spec: outSelectedSpecData?.specName || spec, // 存在
-        settleType: settleType,                      // 存在
-        outPrice: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0, // 存在
-        salePrice: finalSalePrice,                   // 存在
-        outNum: actualOutBaseQty,                    // 存在
-        outAmount: totalOutAmount,                   // 存在
-        saleAmount: saleAmount,                      // 存在
-        recordDate: recordDate,                      // 存在
-        inRecordId: outDetail[0].inRecordId,         // 存在
-        outDetail: detailStr,                        // 存在
+    if (outType === '平台销售') {
+        // 平台销售：必须校验价格并计算销售金额
+        const priceValue = document.getElementById('outSalePrice').value || '';
+        const isPriceEmpty = !priceValue || priceValue === '' || priceValue === '￥0.00' || priceValue === '￥' || priceValue === '￥0' || priceValue.trim() === '' || priceValue === '价格未录入' || priceValue.includes('请选择') || priceValue.includes('未录入');
+        const tempSelectedPrice = window._outSelectedSalePrice !== null && window._outSelectedSalePrice !== undefined ? window._outSelectedSalePrice : salePrice;
         
-        // ✅ 严格使用新加的列名（蛇形命名），用于记录你所选的“规格3”和数量
+        if (isPriceEmpty || tempSelectedPrice === null || tempSelectedPrice === 0 || tempSelectedPrice === undefined) return alert('请提醒商品部人员录入价格！');
+        
+        finalSalePrice = tempSelectedPrice;
+        saleAmount = Number((finalSalePrice * outNum).toFixed(2));
+        
+    } else if (outType === '报损' || outType === '赠送') {
+        // 报损/赠送：不产生销售收入
+        finalSalePrice = 0;
+        saleAmount = 0;
+    }
+    
+    // ✅ 严格只发送 stock_out 表真实存在的字段
+    let postData = {
+        supplier: supplier,
+        goodsName: goodsName,
+        spec: outSelectedSpecData?.specName || spec,
+        settleType: settleType,
+        outType: outType, // 新增：存储出库类型
+        outPrice: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0,
+        salePrice: finalSalePrice, // 报损/赠送时为 0
+        outNum: actualOutBaseQty,
+        outAmount: totalOutAmount,
+        saleAmount: saleAmount,    // 报损/赠送时为 0
+        recordDate: recordDate,
+        inRecordId: outDetail[0].inRecordId,
+        outDetail: detailStr,
+        
         conversion_unit: outSelectedSpecData?.specName || outSelectedSpecData?.unit || '', 
         conversion_rate: outSelectedSpecData?.conversion_rate || 1,
         display_out_num: outNum 
@@ -978,6 +995,7 @@ async function submitStockOut() {
         showMsg('出库请求异常');
     }
 }
+
 // ========== 导出/导入/模板、分页、排序、删除 等通用功能 ==========
 function downloadStockOutTemplate() {
     const header = ["供应商", "商品名称", "规格", "结算方式", "出库单价", "销售单价", "出库数量", "出库金额", "销售金额", "录入日期"];
@@ -1069,7 +1087,7 @@ function updateOutSortIcon() {
     if (idx > -1) document.querySelectorAll('.outSortIcon')[idx].innerText = outSortAsc ? '↑' : '↓';
 }
 
-// ========== 渲染表格 ==========
+// ========== 渲染表格（显示完整规格、出库类型、控制报损金额） ==========
 function renderStockOut() {
     let start = (outCurrentPage - 1) * outPageSize;
     let pageData = filteredStockOut.slice(start, start + outPageSize);
@@ -1078,10 +1096,32 @@ function renderStockOut() {
     tb.innerHTML = '';
     
     pageData.forEach((item, idx) => {
-        // 优先读取新加的 conversion_unit 字段，否则回退读取旧的 spec
-        let specDisplay = item.conversion_unit || item.spec || '-';
-        // 显示实际出库的份数，如果旧数据没有 display_out_num，则回退计算
+        // 1. 构建完整规格显示（如：份（100克））跟入库一致
+        let specDisplay = '-';
+        let specName = item.conversion_unit || item.spec || '';
+        let rate = Number(item.conversion_rate || 1);
+        if (specName && rate > 0) {
+            specDisplay = `<div style="display:flex;flex-direction:column;align-items:center;line-height:1.4;">
+                <span style="font-weight:bold;font-size:14px;">${specName}</span>
+                <span style="font-size:12px;color:#999;">（${rate}克）</span>
+            </div>`;
+        } else {
+            specDisplay = item.spec || '-';
+        }
+
+        // 2. 实际出库数量
         let displayNum = item.display_out_num || Math.floor(Number(item.outNum || 0) / (Number(item.conversion_rate || 1)));
+        
+        // 3. 获取出库类型，控制金额显示
+        let outType = item.outType || '-';
+        let salePriceDisplay = formatMoney(item.salePrice || 0);
+        let saleAmountDisplay = formatMoney(item.saleAmount || 0);
+        
+        // 即使是老数据，如果类型是报损/赠送，强制显示 0
+        if (outType === '报损' || outType === '赠送') {
+            salePriceDisplay = '￥0.00';
+            saleAmountDisplay = '￥0.00';
+        }
         
         let html = `
             <tr>
@@ -1089,13 +1129,14 @@ function renderStockOut() {
                 <td>${start + idx + 1}</td>
                 <td>${item.supplier || ''}</td>
                 <td>${item.goodsName || ''}</td>
-                <td>${specDisplay}</td> <!-- 显示所选的“规格3” -->
+                <td style="text-align:center;">${specDisplay}</td>
                 <td>${item.settleType || ''}</td>
+                <td>${outType}</td> <!-- 新增：出库类型 -->
                 <td>${formatMoney(item.outPrice)}</td>
-                <td>${formatMoney(item.salePrice)}</td>
-                <td>${displayNum}</td> <!-- 显示实际出库的“5份” -->
+                <td>${salePriceDisplay}</td> <!-- 销售单价 -->
+                <td>${displayNum}</td>
                 <td>${formatMoney(item.outAmount)}</td>
-                <td>${formatMoney(item.saleAmount)}</td>
+                <td>${saleAmountDisplay}</td> <!-- 销售金额 -->
                 <td>${item.recordDate || ''}</td>
                 <td>
                     <button class="btn btn-danger" onclick="deleteStockOut(${item.id})">删除</button>

@@ -626,22 +626,23 @@
         <div class="table-container">
             <table>
                 <thead>
-                    <tr>
-                        <th><input type="checkbox" id="outSelectAll" onchange="outToggleSelectAll()"> 选择</th>
-                        <th>序号</th>
-                        <th class="sortable" onclick="outSortTable('supplier')">供应商 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('goodsName')">商品名 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('spec')">规格 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('settleType')">结算方式 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('outPrice')">出库单价 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('salePrice')">销售单价 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('outNum')">出库数量 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('outAmount')">出库金额 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('saleAmount')">销售金额 <span class="outSortIcon"></span></th>
-                        <th class="sortable" onclick="outSortTable('recordDate')">录入日期 <span class="outSortIcon"></span></th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
+    <tr>
+        <th><input type="checkbox" id="outSelectAll" onchange="outToggleSelectAll()"> 选择</th>
+        <th>序号</th>
+        <th class="sortable" onclick="outSortTable('supplier')">供应商 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('goodsName')">商品名 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('spec')">规格 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('settleType')">结算方式 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('outType')">出库类型 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('outPrice')">出库单价 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('salePrice')">销售单价 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('outNum')">出库数量 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('outAmount')">出库金额 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('saleAmount')">销售金额 <span class="outSortIcon"></span></th>
+        <th class="sortable" onclick="outSortTable('recordDate')">录入日期 <span class="outSortIcon"></span></th>
+        <th>操作</th>
+    </tr>
+</thead>
                 <tbody id="stockOutList"></tbody>
             </table>
         </div>
@@ -1755,9 +1756,10 @@
                 <select id="outType" 
                         style="flex:1; min-width:0; padding:10px 14px; border:1px solid #ddd; border-radius:4px; font-size:15px; height:44px; background:#fff; cursor:pointer;">
                     <option value="">请选择出库类型</option>
-                    <option value="APP销售">APP销售</option>
-                    <option value="报损">报损</option>
-                </select>
+    <option value="平台销售">平台销售</option>
+    <option value="报损">报损</option>
+    <option value="赠送">赠送</option>
+</select>
             </div>
             <!-- 占位，保持布局 -->
             <div style="flex:1; min-width:280px;"></div>
