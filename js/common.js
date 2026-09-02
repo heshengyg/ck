@@ -240,7 +240,6 @@ let stockDataCache = new Map();
 function refreshAllStockCache(inList, outList) {
     stockDataCache.clear();
     const uniqueKeySet = new Set();
-    // ✅ 按照供应商|商品名分组
     inList.forEach(item => {
         const key = `${item.supplier}|${item.goodsName}`;
         uniqueKeySet.add(key);
@@ -249,8 +248,8 @@ function refreshAllStockCache(inList, outList) {
         const parts = key.split('|');
         const sup = parts[0];
         const gName = parts[1];
-        // ✅ 直接使用 getStockBatchList 的结果，全量实时计算不靠缓存脏数据
         const batchList = getStockBatchList(sup, gName);
+        // ✅ 总库存 = 批次剩余克数之和
         stockDataCache.set(key, {
             totalStock: batchList.reduce((sum, b) => sum + b.batchRemain, 0),
             batchList: batchList
@@ -556,8 +555,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // ===================== 公共工具函数：库存计算（最终修复版） =====================
 /**
- * 按【供应商+商品名+入库规格ID+日期】严格区分批次。
- * 终极修复：不再依赖数据库的 batch_stock 残留值，全部通过前端全量计算得出真实库存。
+ * 终极修复版：严格按【供应商+商品名+入库规格ID+日期】合并为同一个批次。
+ * 核心逻辑：同批次的所有入库记录，拥有的批次库存必定完全相同。
  */
 function getStockBatchList(supplier, goodsName) {
     let inList = allStockIn.filter(item => 
@@ -567,7 +566,7 @@ function getStockBatchList(supplier, goodsName) {
     let batchMap = {};
     inList.forEach(inItem => {
         let specId = inItem.unit_spec_id || 0; 
-        // Key 必须包含入库规格ID和日期，这是不变的
+        // 核心 Key：供应商_商品_规格_生产日期_到期日期
         let batchKey = `${inItem.supplier}_${inItem.goodsName}_${specId}_${inItem.produce_date || ''}_${inItem.expire_date || ''}`;
         
         if (!batchMap[batchKey]) {
@@ -579,80 +578,72 @@ function getStockBatchList(supplier, goodsName) {
                 settleType: inItem.settleType,
                 produce_date: inItem.produce_date,
                 expire_date: inItem.expire_date,
-                inRecords: [],
-                totalInNum: 0, // 基础单位总数（克）
-                batchRemain: 0 // 剩余基础单位总数（克）
+                inRecords: [], // 该批次下的所有入库记录
+                totalInNum: 0, // 该批次总入库克数
+                batchRemain: 0 // 该批次总剩余克数（所有记录共享）
             };
         }
         batchMap[batchKey].inRecords.push(inItem);
         
-        // 强制计算基础单位
+        // 强制计算该条记录的基础单位（克）
         let baseNum = inItem.base_num;
         if (!baseNum || isNaN(baseNum)) {
             let spec = unitSpecList.find(s => s.id == specId);
             let rate = spec ? (spec.convert_rate || 1) : 1;
             baseNum = Number(inItem.in_num || 0) * rate;
         }
+        // 累加该批次总入库克数
         batchMap[batchKey].totalInNum += Number(baseNum);
     });
 
+    // 遍历批次，计算每个批次的真实剩余库存
     Object.values(batchMap).forEach(batch => {
         let outTotal = 0;
         let returnTotal = 0;
-        let currentBaseNum = 0;
-        
-        // 获取当前批次的原始入库克数
-        if (batch.inRecords && batch.inRecords.length > 0) {
-             let record = batch.inRecords[0];
-             currentBaseNum = record.base_num || (Number(record.in_num || 0) * (unitSpecList.find(s => s.id == record.unit_spec_id)?.convert_rate || 1));
-        }
-        
-        // 统计出库（克数） - 确保这里也是精确匹配
+
+        // 1. 统计出库（克数）：只看该批次（Key）总共出了多少，不看具体扣了哪条ID！
         allStockOut.forEach(out => {
             if (out.supplier === supplier && out.goodsName === goodsName) {
+                // 兼容旧数据的 outDetail 对象和新的 batchKey 匹配
                 if (out.outDetail) {
                     try {
-                        let detailList = typeof out.outDetail === 'string' 
-                            ? JSON.parse(out.outDetail) 
-                            : out.outDetail;
+                        let detailList = typeof out.outDetail === 'string' ? JSON.parse(out.outDetail) : out.outDetail;
                         if (Array.isArray(detailList)) {
                             detailList.forEach(detail => {
-                                let isInBatch = batch.inRecords.some(inItem => inItem.id === detail.inRecordId);
-                                if (isInBatch) {
+                                // 通过 batchKey 匹配（因为同批次 Key 一样）
+                                if (detail.batchKey === batch.batchKey_Real || (batch.batchKey_Real && detail.batchKey === batch.batchKey_Real)) {
+                                    outTotal += Number(detail.useNum || 0);
+                                } else if (batch.inRecords.some(inItem => inItem.id === detail.inRecordId)) {
                                     outTotal += Number(detail.useNum || 0);
                                 }
                             });
                         }
                     } catch (e) {}
-                } else if (out.inRecordId) {
-                    let isInBatch = batch.inRecords.some(inItem => inItem.id === out.inRecordId);
-                    if (isInBatch) {
-                        outTotal += Number(out.outNum || 0);
-                    }
+                } else if (out.inRecordId && batch.inRecords.some(inItem => inItem.id === out.inRecordId)) {
+                    // 旧逻辑匹配 ID
+                    outTotal += Number(out.outNum || 0);
                 }
             }
         });
-        
-        // 统计退货（克数）
+
+        // 2. 统计退货（克数）：同样只看整个批次总共退了多少，不看具体ID
         if (allReturnGoods && allReturnGoods.length > 0) {
             allReturnGoods.forEach(returnItem => {
                 if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
-                    let isInBatch = batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id);
-                    if (isInBatch) {
+                    if (batch.inRecords.some(inItem => inItem.id === returnItem.in_record_id)) {
                         let specId = batch.unitSpecId;
                         let spec = unitSpecList.find(s => s.id == specId);
                         let rate = spec ? (spec.convert_rate || 1) : 1;
-                        // 假设 return_num 是份数，乘以 rate 换算成克
                         returnTotal += (Number(returnItem.return_num || 0) * rate);
                     }
                 }
             });
         }
 
-        // ✅ 最终核心计算：当前批次总克数 - 出库克数 - 退货克数
-        batch.batchRemain = Math.max(0, currentBaseNum - outTotal - returnTotal);
+        // 3. 终极计算：该批次总剩余克数 = 该批次总入库克数 - 该批次总出库克数 - 该批次总退货克数
+        batch.batchRemain = Math.max(0, batch.totalInNum - outTotal - returnTotal);
         
-        // 计算显示数量（份/袋）
+        // 4. 格式化显示份数
         const firstRecord = batch.inRecords[0];
         let convertRate = 1;
         if (firstRecord && firstRecord.unit_spec_id) {
@@ -663,8 +654,10 @@ function getStockBatchList(supplier, goodsName) {
         if (batch.displayNum < 0) batch.displayNum = 0;
     });
 
+    // 只返回有库存的批次
     let batchList = Object.values(batchMap).filter(b => b.batchRemain > 0);
 
+    // 按到期日期，生产日期，最早入库顺序排序（FIFO）
     batchList.sort((a, b) => {
         if (a.expire_date && b.expire_date) {
             let edDiff = new Date(a.expire_date) - new Date(b.expire_date);

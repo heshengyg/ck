@@ -903,23 +903,37 @@ async function submitStockOut() {
     if (outDetail.length === 0) return alert('无可用库存批次');
     let detailStr = JSON.stringify(outDetail);
     
-    // ===== 修复核心：计算总出库成本 =====
-    // 出库成本 = (各批次入库单价 * 对应出库的克数 / 换算率) 的和
-    // 例如：11.5元/份 * 8份 = 92元
-    let totalOutAmount = 0;
+       // ===== 修复核心：计算总出库成本 (彻底修复出库单价因单位混淆导致的 10.45 Bug) =====
+    // 正确的逻辑：totalOutUnits（总共出库份数）和 totalOutAmount（总出库成本）
+    // 出库金额 = (批次A扣减的份数 * 批次A入库单价) + (批次B扣减的份数 * 批次B入库单价) ...
+    // 出库单价 = 总出库成本 / 总出库份数
+    
+    let totalOutUnits = 0; // 总出库份数
+    let totalOutAmount = 0; // 总出库金额
+
     outDetail.forEach(detail => {
         let inRec = allStockIn.find(inRec => String(inRec.id) === String(detail.inRecordId));
         if (inRec) {
-            // detail.useNum 是克数，除以换算率得到份数
+            // 获取该批次的换算率（每份多少克）
             let currentRate = 1;
             let spec = unitSpecList.find(s => s.id == inRec.unit_spec_id);
             if (spec) currentRate = spec.convert_rate || 1;
-            
+
+            // ✅ 精确换算：扣减克数 / 每份克数 = 这批次扣了多少“份”
             let units = detail.useNum / currentRate;
+
+            // 累加总出库份数
+            totalOutUnits += units;
+            // 累加总出库成本：份数 * 入库单价
             totalOutAmount += Number(inRec.in_price || 0) * units;
         }
     });
+    
+    // 保留两位小数
     totalOutAmount = Number(totalOutAmount.toFixed(2));
+    
+    // ✅ 计算真正的加权平均出库单价
+    let finalOutPrice = totalOutUnits > 0 ? Number((totalOutAmount / totalOutUnits).toFixed(2)) : 0;
     
     // ===== 根据出库类型判定销售金额 =====
     let finalSalePrice = 0;
@@ -939,16 +953,16 @@ async function submitStockOut() {
         saleAmount = 0;
     }
     
-    let postData = {
+        let postData = {
         supplier: supplier,
         goodsName: goodsName,
         spec: outSelectedSpecData?.specName || spec,
         settleType: settleType,
         outType: outType, 
-        outPrice: Number((totalOutAmount / outNum).toFixed(2)), // 成本单价 = 总成本 / 份数
+        outPrice: finalOutPrice, // ✅ 使用我们修正后的加权平均单价
         salePrice: finalSalePrice, 
         outNum: actualOutBaseQty,
-        outAmount: totalOutAmount, // 现在能正常显示 92 元而不是 9200 元了
+        outAmount: totalOutAmount, // ✅ 使用我们修正后的总出库成本
         saleAmount: saleAmount,    
         recordDate: recordDate,
         inRecordId: outDetail[0].inRecordId,
@@ -1078,7 +1092,7 @@ function updateOutSortIcon() {
     if (idx > -1) document.querySelectorAll('.outSortIcon')[idx].innerText = outSortAsc ? '↑' : '↓';
 }
 
-// ========== 渲染表格（显示完整规格、出库类型、控制报损金额） ==========
+// ========== 渲染表格（直接读取计算好的单价和金额，杜绝前端二次计算错误） ==========
 function renderStockOut() {
     let start = (outCurrentPage - 1) * outPageSize;
     let pageData = filteredStockOut.slice(start, start + outPageSize);
@@ -1108,11 +1122,14 @@ function renderStockOut() {
         let salePriceDisplay = formatMoney(item.salePrice || 0);
         let saleAmountDisplay = formatMoney(item.saleAmount || 0);
         
-        // 即使是老数据，如果类型是报损/赠送，强制显示 0
         if (outType === '报损' || outType === '赠送') {
             salePriceDisplay = '￥0.00';
             saleAmountDisplay = '￥0.00';
         }
+        
+        // ✅ 100% 直接读取数据库算好的值，不做任何前端计算！
+        let outPriceDisplay = formatMoney(item.outPrice); 
+        let outAmountDisplay = formatMoney(item.outAmount);
         
         let html = `
             <tr>
@@ -1122,12 +1139,12 @@ function renderStockOut() {
                 <td>${item.goodsName || ''}</td>
                 <td style="text-align:center;">${specDisplay}</td>
                 <td>${item.settleType || ''}</td>
-                <td>${outType}</td> <!-- 新增：出库类型 -->
-                <td>${formatMoney(item.outPrice)}</td>
-                <td>${salePriceDisplay}</td> <!-- 销售单价 -->
+                <td>${outType}</td>
+                <td>${outPriceDisplay}</td> <!-- 真实出库单价（加权平均） -->
+                <td>${salePriceDisplay}</td>
                 <td>${displayNum}</td>
-                <td>${formatMoney(item.outAmount)}</td>
-                <td>${saleAmountDisplay}</td> <!-- 销售金额 -->
+                <td>${outAmountDisplay}</td> <!-- 真实出库金额（总成本） -->
+                <td>${saleAmountDisplay}</td>
                 <td>${item.recordDate || ''}</td>
                 <td>
                     <button class="btn btn-danger" onclick="deleteStockOut(${item.id})">删除</button>
