@@ -903,39 +903,41 @@ async function submitStockOut() {
     if (outDetail.length === 0) return alert('无可用库存批次');
     let detailStr = JSON.stringify(outDetail);
     
-    // ===== 终极精准修复：全精度计算分摊，最后才保留两位小数显示 =====
-    // 财务规则：先算准确，后四舍五入
+    // ===== 终极精准修复：统一以最小单位(克)计算金额，再除以出库规格换算率计算单价 =====
+    // 规则：1. 内部计算全精度，不四舍五入；2. 显示前只保留两位小数
+    
     let totalOutAmount = 0; // 总出库金额（全精度累加）
-    let totalOutUnits = 0;  // 总出库份数（用于计算展示单价）
-
+    
+    // 遍历所有被扣减的真实入库批次
     outDetail.forEach(detail => {
         let inRec = allStockIn.find(inRec => String(inRec.id) === String(detail.inRecordId));
         if (inRec) {
-            // 当前批次实际扣减了多少“克”
+            // 当前批次扣减了多少“克”
             let useNumGrams = Number(detail.useNum || 0); 
             
-            // 获取该批次的换算率（例如：1份 = 100克，或 1袋 = 1200克）
+            // 获取该批次的真实换算率（例如：1份 = 100克，或 1袋 = 1200克）
             let currentRate = 1;
             let spec = unitSpecList.find(s => s.id == inRec.unit_spec_id);
             if (spec) currentRate = spec.convert_rate || 1;
 
-            // ✅ 核心1：算出该批次的“每克单价”（保留原样，不做任何四舍五入）
+            // ✅ 核心：该批次【每克单价】（不做任何四舍五入）
             let pricePerGram = (Number(inRec.in_price || 0)) / currentRate;
             
-            // ✅ 核心2：扣减克数 * 每克单价 = 该批次分摊的真实成本（保留全精度）
+            // ✅ 核心：扣减的克数 * 每克单价 = 该批次的真实分摊金额（全精度累加）
             totalOutAmount += useNumGrams * pricePerGram;
-            
-            // 记录总出库份数（换算成当前所选规格的份数）
-            totalOutUnits += useNumGrams / currentRate;
         }
     });
     
-    // ✅ 核心3：只有到了最后入库保存这唯一一步，才四舍五入到2位小数
-    // 这样保证了总金额 = 所有批次分摊的精确之和，不会有任何尾差！
+    // ✅ 到达最后一步，才进行四舍五入到2位（确保不再有尾差）
     totalOutAmount = Number(totalOutAmount.toFixed(2));
     
-    // 计算准确的加权平均展示单价（同样最后保留2位）
-    let finalOutPrice = totalOutUnits > 0 ? Number((totalOutAmount / totalOutUnits).toFixed(2)) : 0;
+    // ✅ 计算最终的“出库单价”：
+    // 总出库份数 = 该单据总出库克数(actualOutBaseQty) / 当前选择的出库规格换算率(conversionRate)
+    // 例如：1000克 / 100克每份 = 10份
+    let displayTotalUnits = actualOutBaseQty / conversionRate;
+    
+    // 最终单价 = 总金额 / 总份数（保留2位）
+    let finalOutPrice = displayTotalUnits > 0 ? Number((totalOutAmount / displayTotalUnits).toFixed(2)) : 0;
     // ===== 根据出库类型判定销售金额 =====
     let finalSalePrice = 0;
     let saleAmount = 0;
