@@ -927,27 +927,31 @@ async function submitStockOut() {
     }
     let saleAmount = Number((finalSalePrice * outNum).toFixed(2));
     
-    // ✅ 关键：创建单条出库汇总记录
-    // ⚠️ 注意：这里 100% 使用了数据库常用的 snake_case（下划线命名）
+    // ✅ 严格按照数据库截图中的【驼峰命名】构造数据！
     let postData = {
         supplier: supplier,
-        goods_name: goodsName,
-        spec: outSelectedSpecData?.specName || spec,
-        settle_type: settleType,
-        out_type: outType,
-        out_price: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0,
-        sale_price: finalSalePrice,
-        out_num: actualOutBaseQty, 
-        out_amount: totalOutAmount,
-        sale_amount: saleAmount,
-        record_date: recordDate,
-        in_record_id: outDetail[0].inRecordId, 
-        out_detail: detailStr,
-        conversion_spec: document.getElementById('outSpecSelect').value,
-        conversion_unit: outSelectedSpecData?.specName || outSelectedSpecData?.unit || '',
-        conversion_rate: outSelectedSpecData?.conversion_rate || 1,
-        display_out_num: outNum
+        goodsName: goodsName,               // 表字段: goodsName
+        spec: outSelectedSpecData?.specName || spec, // 表字段: spec (为字符串类型)
+        settleType: settleType,             // 表字段: settleType
+        outType: outType,                   // 必须确保你的 stock_out 表有这个字段！（截图中未显示，如果截图中没有，这里不要传，否则也报400）
+        outPrice: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0, // 表字段: outPrice
+        salePrice: finalSalePrice,          // 表字段: salePrice
+        outNum: actualOutBaseQty,           // 表字段: outNum
+        outAmount: totalOutAmount,          // 表字段: outAmount
+        saleAmount: saleAmount,             // 表字段: saleAmount
+        recordDate: recordDate,             // 表字段: recordDate
+        inRecordId: outDetail[0].inRecordId, // 表字段: inRecordId
+        outDetail: detailStr,               // 表字段: outDetail (为 JSON 类型)
+        
+        // 下面这些字段如果数据库里【没有】，请注释掉，否则会报 400！
+        // 但为了满足你说的“显示规格3”，建议你在 Supabase 里加个列：conversionUnit (text)
+        conversionUnit: outSelectedSpecData?.specName || outSelectedSpecData?.unit || '', 
+        conversionRate: outSelectedSpecData?.conversion_rate || 1,
+        displayOutNum: outNum
     };
+
+    // ⚠️ 数据库截图里没有 outType，如果 400 报错，说明这个字段不存在，请将其从 postData 中删除：
+    // delete postData.outType; 
     
     try {
         let res = await fetch(`${SUPABASE_URL}/rest/v1/stock_out`, {
@@ -961,7 +965,6 @@ async function submitStockOut() {
             body: JSON.stringify(postData)
         });
         
-        // 增加错误日志输出，便于定位 404 原因
         if (!res.ok) {
             console.error('出库提交失败，错误响应:', res.status, res.statusText);
             try {
