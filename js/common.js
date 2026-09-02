@@ -568,7 +568,6 @@ function getStockBatchList(supplier, goodsName) {
     let batchMap = {};
     inList.forEach(inItem => {
         let specId = inItem.unit_spec_id || 0; 
-        // Key 必须包含入库规格ID和日期，这是不变的
         let batchKey = `${inItem.supplier}_${inItem.goodsName}_${specId}_${inItem.produce_date || ''}_${inItem.expire_date || ''}`;
         
         if (!batchMap[batchKey]) {
@@ -587,7 +586,7 @@ function getStockBatchList(supplier, goodsName) {
         }
         batchMap[batchKey].inRecords.push(inItem);
         
-        // 计算当前批次的原始入库总克数
+        // 仅为了记录原始入库基数
         let baseNum = inItem.base_num;
         if (!baseNum || isNaN(baseNum)) {
             let spec = unitSpecList.find(s => s.id == specId);
@@ -596,16 +595,20 @@ function getStockBatchList(supplier, goodsName) {
         }
         batchMap[batchKey].totalInNum += Number(baseNum);
         
-        // ✅ 关键修复：如果数据库里该入库记录的 batch_stock 有值，直接采用，且只考虑大于0的
-        // 这样新入库的(>0)就不会受旧批次(为0)的影响
-        if (inItem.batch_stock !== null && inItem.batch_stock !== undefined && Number(inItem.batch_stock) > 0) {
-            batchMap[batchKey].batchRemain += Number(inItem.batch_stock);
+        // ✅✅ 核心修复：绝对信任数据库已经算好的 batch_stock
+        // 无论它是 0 还是正数，都代表真实的库存，如果为0，代表彻底卖完了。
+        let dbStock = Number(inItem.batch_stock || 0);
+        if (dbStock >= 0) {
+            batchMap[batchKey].batchRemain += dbStock;
         }
     });
 
-    // 如果前端完全没有缓存到 batch_stock，使用后端计算（这是一个兜底方案）
+    // ✅ 兜底方案（只在数据库完全没有 batch_stock 旧数据时才走这里）
     Object.values(batchMap).forEach(batch => {
-        if (batch.batchRemain === 0) {
+        // 如果数据库里明确存了 0，或者已经算了正数，就不需要前端干预了
+        let hasValidDbStock = batch.inRecords.some(item => item.batch_stock !== null && item.batch_stock !== undefined);
+        
+        if (!hasValidDbStock) {
             let outTotal = 0;
             let returnTotal = 0;
             let currentBaseNum = 0;
@@ -614,7 +617,6 @@ function getStockBatchList(supplier, goodsName) {
                 currentBaseNum = record.base_num || (Number(record.in_num || 0) * (unitSpecList.find(s => s.id == record.unit_spec_id)?.convert_rate || 1));
             }
             
-            // 统计出库
             allStockOut.forEach(out => {
                 if (out.supplier === supplier && out.goodsName === goodsName) {
                     if (out.outDetail) {
@@ -634,7 +636,6 @@ function getStockBatchList(supplier, goodsName) {
                 }
             });
             
-            // 统计退货
             if (allReturnGoods && allReturnGoods.length > 0) {
                 allReturnGoods.forEach(returnItem => {
                     if (returnItem.supplier === supplier && returnItem.goods_name === goodsName) {
@@ -648,7 +649,6 @@ function getStockBatchList(supplier, goodsName) {
                     }
                 });
             }
-
             batch.batchRemain = Math.max(0, currentBaseNum - outTotal - returnTotal);
         }
         

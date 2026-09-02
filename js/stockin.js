@@ -1295,7 +1295,7 @@ async function submitStockIn(){
 if (res.status >= 200 && res.status < 300) {
     try { await res.json(); } catch {}
     
-    // ✅ 入库成功后更新库存字段
+    // ✅ 必须等待数据库字段更新完毕，然后再刷新前端，防止读到旧值
     try {
         await updateStockFields(supplier, goodsName);
         console.log('✅ updateStockFields 执行完成');
@@ -1303,7 +1303,6 @@ if (res.status >= 200 && res.status < 300) {
         console.error('❌ updateStockFields 执行失败:', e);
     }
     
-    // ✅ 入库成功后，更新 price_temp_state 表
     try {
         await updatePriceTempState(goodsId, unitSpecId, salePrice);
     } catch (e) {
@@ -1312,7 +1311,11 @@ if (res.status >= 200 && res.status < 300) {
     
     showMsg(editId ? '编辑成功' : '入库成功');
     closeStockInForm();
+    
+    // ✅ 强制清空缓存，确保 loadStockIn 拿到的是新鲜的 batch_stock
+    stockDataCache.clear();
     await loadStockIn();
+    
     return;
 }
         throw new Error('请求失败');

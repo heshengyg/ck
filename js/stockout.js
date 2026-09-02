@@ -875,9 +875,7 @@ async function submitStockOut() {
     let goodsName = document.getElementById('outGoodsSearchInput').value.trim();
     let spec = document.getElementById('outSpec').value || ''; 
     let settleType = document.getElementById('outSettleType').value || '';
-    let outType = document.getElementById('outType').value || ''; // 出库类型
-    let salePriceText = document.getElementById('outSalePrice').value;
-    let salePrice = parseFloat(salePriceText.replace(/[￥,¥]/g, '')) || 0;
+    let outType = document.getElementById('outType').value || ''; 
     let outNum = Number(document.getElementById('outNum').value) || 0; 
     let recordDate = document.getElementById('outRecordDate').value;
     
@@ -889,7 +887,6 @@ async function submitStockOut() {
     if (outNum < 1) return alert('出库数量必须大于0');
     if (!recordDate) return alert('请选择录入日期');
 
-    // 库存逻辑校验（报损/赠送也需要消耗库存）
     const bzStatus = window._outSelectedBzStatus || '';
     if (bzStatus === '过期') return alert('⚠️ 当前商品已过期，请做退货处理！');
     
@@ -906,58 +903,56 @@ async function submitStockOut() {
     if (outDetail.length === 0) return alert('无可用库存批次');
     let detailStr = JSON.stringify(outDetail);
     
-    // 计算总出库成本（无论何种类型，成本必须产生）
+    // ===== 修复核心：计算总出库成本 =====
+    // 出库成本 = (各批次入库单价 * 对应出库的克数 / 换算率) 的和
+    // 例如：11.5元/份 * 8份 = 92元
     let totalOutAmount = 0;
-    let goodsItem = allGoods.find(g => g.name === goodsName && g.supplier === supplier);
-    if (settleType === '线上') {
-        let onlineCost = goodsItem ? Number(goodsItem.online_cost) : 0;
-        totalOutAmount = Number((onlineCost * actualOutBaseQty).toFixed(2));
-    } else {
-        let totalInPriceSum = 0;
-        outDetail.forEach(detail => {
-            let inRec = allStockIn.find(inRec => String(inRec.id) === String(detail.inRecordId));
-            if (inRec) totalInPriceSum += Number(inRec.in_price || 0) * detail.useNum;
-        });
-        totalOutAmount = Number(totalInPriceSum.toFixed(2));
-    }
-
-    // ====== 核心修改：根据出库类型判定销售金额 ======
-    let finalSalePrice = salePrice;
+    outDetail.forEach(detail => {
+        let inRec = allStockIn.find(inRec => String(inRec.id) === String(detail.inRecordId));
+        if (inRec) {
+            // detail.useNum 是克数，除以换算率得到份数
+            let currentRate = 1;
+            let spec = unitSpecList.find(s => s.id == inRec.unit_spec_id);
+            if (spec) currentRate = spec.convert_rate || 1;
+            
+            let units = detail.useNum / currentRate;
+            totalOutAmount += Number(inRec.in_price || 0) * units;
+        }
+    });
+    totalOutAmount = Number(totalOutAmount.toFixed(2));
+    
+    // ===== 根据出库类型判定销售金额 =====
+    let finalSalePrice = 0;
     let saleAmount = 0;
     
     if (outType === '平台销售') {
-        // 平台销售：必须校验价格并计算销售金额
         const priceValue = document.getElementById('outSalePrice').value || '';
         const isPriceEmpty = !priceValue || priceValue === '' || priceValue === '￥0.00' || priceValue === '￥' || priceValue === '￥0' || priceValue.trim() === '' || priceValue === '价格未录入' || priceValue.includes('请选择') || priceValue.includes('未录入');
-        const tempSelectedPrice = window._outSelectedSalePrice !== null && window._outSelectedSalePrice !== undefined ? window._outSelectedSalePrice : salePrice;
+        const tempSelectedPrice = window._outSelectedSalePrice !== null && window._outSelectedSalePrice !== undefined ? window._outSelectedSalePrice : 0;
         
         if (isPriceEmpty || tempSelectedPrice === null || tempSelectedPrice === 0 || tempSelectedPrice === undefined) return alert('请提醒商品部人员录入价格！');
         
         finalSalePrice = tempSelectedPrice;
         saleAmount = Number((finalSalePrice * outNum).toFixed(2));
-        
     } else if (outType === '报损' || outType === '赠送') {
-        // 报损/赠送：不产生销售收入
         finalSalePrice = 0;
         saleAmount = 0;
     }
     
-    // ✅ 严格只发送 stock_out 表真实存在的字段
     let postData = {
         supplier: supplier,
         goodsName: goodsName,
         spec: outSelectedSpecData?.specName || spec,
         settleType: settleType,
-        outType: outType, // 新增：存储出库类型
-        outPrice: totalOutAmount > 0 ? Number((totalOutAmount / actualOutBaseQty).toFixed(2)) : 0,
-        salePrice: finalSalePrice, // 报损/赠送时为 0
+        outType: outType, 
+        outPrice: Number((totalOutAmount / outNum).toFixed(2)), // 成本单价 = 总成本 / 份数
+        salePrice: finalSalePrice, 
         outNum: actualOutBaseQty,
-        outAmount: totalOutAmount,
-        saleAmount: saleAmount,    // 报损/赠送时为 0
+        outAmount: totalOutAmount, // 现在能正常显示 92 元而不是 9200 元了
+        saleAmount: saleAmount,    
         recordDate: recordDate,
         inRecordId: outDetail[0].inRecordId,
         outDetail: detailStr,
-        
         conversion_unit: outSelectedSpecData?.specName || outSelectedSpecData?.unit || '', 
         conversion_rate: outSelectedSpecData?.conversion_rate || 1,
         display_out_num: outNum 
@@ -977,10 +972,6 @@ async function submitStockOut() {
         
         if (!res.ok) {
             console.error('出库提交失败，错误响应:', res.status, res.statusText);
-            try {
-                const errData = await res.json();
-                console.error('服务器返回的错误详情:', errData);
-            } catch(e) {}
             return showMsg('出库提交失败，请检查数据（请求状态码：' + res.status + '）');
         }
         
