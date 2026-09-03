@@ -1768,7 +1768,6 @@ function buildStockBatchListFromStockIn() {
 function getEarliestBatchDate(supplier, goodsName, spec) {
     try {
         if (!allStockBatchList || allStockBatchList.length === 0) {
-            // 如果 allStockBatchList 为空，尝试从 allStockIn 构建
             if (allStockIn && allStockIn.length > 0) {
                 buildStockBatchListFromStockIn();
             }
@@ -1777,16 +1776,16 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
             }
         }
         
-        // 匹配批次
-        const targetSpecId = spec ? parseInt(spec) : 0;
+        // ✅ 处理 spec 为 undefined 或 null 的情况
+        const targetSpecId = (spec !== undefined && spec !== null) ? parseInt(spec) : 0;
+        
         let batchList = allStockBatchList.filter(function(item) {
             if (item.supplier !== supplier || item.goodsName !== goodsName) {
                 return false;
             }
             const itemSpecId = item.unitSpecId || 0;
             return itemSpecId === targetSpecId;
-        });
-        
+        });        
         if (!batchList || batchList.length === 0) {
             return null;
         }
@@ -2584,14 +2583,19 @@ function fallbackCopyDate(text, btnElement) {
     }
     document.body.removeChild(textarea);
 }
-async function updateSingleGoodsDateWithPrice(id) {
-// 权限拦截
+async function updateSingleGoodsDateWithPrice(id, unitSpecId) {
+    // 权限拦截
     if (!canOperateDateUpdate()) {
         showMsg('当前角色无更新商品日期权限（仅管理员、APP部可操作）');
         return;
     }
-    const item = dateChangeFilteredList.find(d => d.id === id);
-    if (!item) return;
+    
+    // ✅ 使用 id 和 unitSpecId 匹配
+    const item = dateChangeFilteredList.find(d => d.id === id && d.unitSpecId === unitSpecId);
+    if (!item) {
+        showMsg('找不到该商品记录');
+        return;
+    }
     
     const statusText = item.earliestBatch?.bzStatusText || '';
     const isDiscountOrExpire = (statusText !== '正常' && statusText !== '过期');
@@ -2602,7 +2606,8 @@ async function updateSingleGoodsDateWithPrice(id) {
         return;
     }
     
-    const earliest = getEarliestBatchDate(item.supplier, item.name, item.spec);
+    // ✅ 传入 unitSpecId（数字）
+    const earliest = getEarliestBatchDate(item.supplier, item.name, unitSpecId);
     if (!earliest || earliest.batchRemain <= 0) {
         showMsg('该商品暂无库存批次');
         return;
@@ -2615,7 +2620,7 @@ async function updateSingleGoodsDateWithPrice(id) {
         last_sale_price: null
     };
     
-    if (!confirm(`确认更新"${item.name}"？\n\n${updateData.saved_produce_date ? '生产日期：' + updateData.saved_produce_date : ''}${updateData.saved_expire_date ? '\n到期日期：' + updateData.saved_expire_date : ''}\n销售价保持不变（sale_price 不会被修改）`)) return;
+    if (!confirm(`确认更新"${item.name}"（${item.specName || item.spec || '-'}）？\n\n${updateData.saved_produce_date ? '生产日期：' + updateData.saved_produce_date : ''}${updateData.saved_expire_date ? '\n到期日期：' + updateData.saved_expire_date : ''}\n销售价保持不变（sale_price 不会被修改）`)) return;
     
     await fetch(`${SUPABASE_URL}/rest/v1/goods?id=eq.${item.id}`, {
         method: 'PATCH',
@@ -2627,8 +2632,6 @@ async function updateSingleGoodsDateWithPrice(id) {
         body: JSON.stringify(updateData)
     });
     
-    // ✅ 关键修改：只有价格发生变化的商品，才清空 price_temp_state
-    // 如果只是更新日期（priceChanged = false），保留状态价格
     if (item.priceChanged) {
         clearPriceTempState(item.id);
         console.log('✅ 价格已变动，清空状态价格');
@@ -2640,14 +2643,13 @@ async function updateSingleGoodsDateWithPrice(id) {
     await loadGoods(true);
     loadDateChangeTab();
 }
-
 async function batchUpdateGoodsDate() {
-// 权限拦截
+    // 权限拦截
     if (!canOperateDateUpdate()) {
         showMsg('当前角色无批量更新权限（仅管理员、APP部可操作）');
         return;
     }
-    // ✅ 修改：统计更新按钮未置灰的行（即 isUpdateDisabled === false）
+    
     const canUpdateList = dateChangeFilteredList.filter(item => {
         return item.isUpdateDisabled === false;
     });
@@ -2660,12 +2662,12 @@ async function batchUpdateGoodsDate() {
     if (!confirm(`⚠ 确认批量更新 ${canUpdateList.length} 条商品？\n点击后数据将完全消失（不可逆）！`)) return;
     
     let successCount = 0;
-    const successIds = [];
     const priceChangedIds = [];
     
     for (const item of canUpdateList) {
         try {
-            const earliest = getEarliestBatchDate(item.supplier, item.name, item.spec);
+            // ✅ 传入 unitSpecId（数字）
+            const earliest = getEarliestBatchDate(item.supplier, item.name, item.unitSpecId || 0);
             if (!earliest || earliest.batchRemain <= 0) continue;
             
             const updateData = {
@@ -2687,7 +2689,6 @@ async function batchUpdateGoodsDate() {
             
             if (response.ok) {
                 successCount++;
-                successIds.push(item.id);
                 if (item.priceChanged) {
                     priceChangedIds.push(item.id);
                 }
@@ -2816,10 +2817,21 @@ function updateDateChangeSortIcon() {
 function getDateChangeSpecDisplay(item) {
     if (!item) return '-';
     
-    // 优先从 earliestBatch 获取规格名称
+    // ✅ 优先使用 item.specName（从 getNeedUpdateGoodsList 传入）
+    if (item.specName && item.specName !== '-') {
+        const specObj = unitSpecList.find(s => s.show_name === item.specName);
+        if (specObj) {
+            const baseItem = baseUnitList.find(u => u.id == specObj.base_unit_id);
+            if (baseItem) {
+                return specObj.show_name + ' (' + specObj.convert_rate + baseItem.unit_name + ')';
+            }
+        }
+        return item.specName;
+    }
+    
+    // 从 earliestBatch 获取
     if (item.earliestBatch && item.earliestBatch.specName) {
         const specName = item.earliestBatch.specName;
-        // 尝试获取换算比例
         const specObj = unitSpecList.find(s => s.show_name === specName);
         if (specObj) {
             const baseItem = baseUnitList.find(u => u.id == specObj.base_unit_id);
@@ -2830,7 +2842,6 @@ function getDateChangeSpecDisplay(item) {
         return specName;
     }
     
-    // 使用 item.spec
     if (item.spec && item.spec !== '-') {
         return item.spec;
     }
@@ -3147,13 +3158,15 @@ document.addEventListener('click', function(e) {
 // ========== 改价弹窗相关函数（新改价逻辑） ==========
 // ============================================================
 
-function openPriceModal(id) {
-// 权限拦截
+function openPriceModal(id, unitSpecId) {
+    // 权限拦截
     if (!canOperatePriceEdit()) {
         showMsg('当前角色无改价权限（仅管理员、商品部可操作）');
         return;
     }
-    const item = dateChangeFilteredList.find(d => d.id === id);
+    
+    // ✅ 使用 id 和 unitSpecId 匹配
+    const item = dateChangeFilteredList.find(d => d.id === id && d.unitSpecId === unitSpecId);
     if (!item) {
         showMsg('找不到该商品');
         return;
@@ -3163,18 +3176,14 @@ function openPriceModal(id) {
     const normalPrice = item.normalPrice || item.sale_price || 0;
     const lastPrice = item.lastSalePrice || normalPrice;
     
-    // ✅ 修复：获取当前状态销售价
     let currentPrice = null;
-    // 直接使用 item.currentSalePrice，即使是 null 也保留
     if (item.currentSalePrice !== undefined) {
         currentPrice = item.currentSalePrice;
     } else {
         currentPrice = normalPrice;
     }
     
-    // ✅ 判断是否为折扣/临期状态（非正常/过期状态）
     const isSpecialStatus = (statusText !== '正常' && statusText !== '过期');
-    // 如果是特殊状态且价格为 null，显示"未录入"
     let displayPrice;
     if (isSpecialStatus && (currentPrice === null || currentPrice === undefined)) {
         displayPrice = '未录入';
@@ -3196,7 +3205,7 @@ function openPriceModal(id) {
             
             <div style="margin-bottom:14px;">
                 <label style="font-weight:bold; display:block; margin-bottom:4px; font-size:14px;">商品</label>
-                <span style="font-size:15px;">${item.name} (${item.spec || '-'})</span>
+                <span style="font-size:15px;">${item.name} (${item.specName || item.spec || '-'})</span>
             </div>
             
             <div style="display:flex; gap:40px; margin-bottom:16px; flex-wrap:wrap;">
@@ -3228,7 +3237,7 @@ function openPriceModal(id) {
             
             <div style="display:flex; gap:10px; justify-content:flex-end; padding-top:10px; border-top:1px solid #eee;">
                 <button onclick="closePriceModal()" style="padding:8px 24px; border:1px solid #ddd; border-radius:4px; background:#f5f5f5; cursor:pointer; font-size:14px;">取消</button>
-                <button onclick="confirmPriceChange(${id})" style="padding:8px 24px; border:none; border-radius:4px; background:#007bff; color:#fff; cursor:pointer; font-size:14px;">确认改价</button>
+                <button onclick="confirmPriceChange(${item.id})" style="padding:8px 24px; border:none; border-radius:4px; background:#007bff; color:#fff; cursor:pointer; font-size:14px;">确认改价</button>
             </div>
         </div>
     `;
@@ -3241,11 +3250,10 @@ function openPriceModal(id) {
     
     document.getElementById('priceModalInput').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
-            confirmPriceChange(id);
+            confirmPriceChange(item.id);
         }
     });
 }
-
 function closePriceModal() {
     const modal = document.getElementById('priceModal');
     if (modal) modal.remove();
