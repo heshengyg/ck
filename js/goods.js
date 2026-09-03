@@ -1741,37 +1741,32 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
         
         const targetSpecId = (spec !== undefined && spec !== null) ? parseInt(spec) : 0;
         
+        // 🔥 严格按 unitSpecId 匹配，只匹配有库存的批次
         let batchList = allStockBatchList.filter(function(item) {
             if (item.supplier !== supplier || item.goodsName !== goodsName) {
                 return false;
             }
-            const itemSpecId = item.unitSpecId || 0;
-            if (targetSpecId === 0) {
-                return true;
+            if (item.batchRemain <= 0) {
+                return false;
             }
+            const itemSpecId = item.unitSpecId || 0;
+            // 🔥 严格匹配：只匹配相同 unitSpecId
             return itemSpecId === targetSpecId;
         });
-        
-        if (!batchList || batchList.length === 0) {
-            batchList = allStockBatchList.filter(function(item) {
-                if (item.supplier !== supplier || item.goodsName !== goodsName) {
-                    return false;
-                }
-                return true;
-            });
-        }
         
         if (!batchList || batchList.length === 0) {
             return null;
         }
         
-        // 按日期排序，取最早的批次
+        // 🔥 按生产日期排序，取最早的批次
         batchList.sort(function(a, b) {
             const getDate = function(item) {
                 if (item.produce_date && item.produce_date !== '-') {
                     return { date: new Date(item.produce_date), type: 'produce' };
                 } else if (item.expire_date && item.expire_date !== '-') {
                     return { date: new Date(item.expire_date), type: 'expire' };
+                } else if (item.recordDate) {
+                    return { date: new Date(item.recordDate), type: 'record' };
                 }
                 return null;
             };
@@ -1814,6 +1809,7 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
             specDisplay = earliest.spec || '-';
         }
         
+        // 获取录入日期
         let recordDate = null;
         if (earliest && allStockIn) {
             const matchedIn = allStockIn.find(function(item) {
@@ -1825,6 +1821,9 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
             if (matchedIn) {
                 recordDate = matchedIn.record_date;
             }
+        }
+        if (!recordDate) {
+            recordDate = earliest.recordDate || null;
         }
         
         let produceDate = null;
@@ -1846,7 +1845,7 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
             produce_date: produceDate,
             expire_date: expireDate,
             batchRemain: earliest.batchRemain || 0,
-            recordDate: recordDate || earliest.recordDate || null,
+            recordDate: recordDate,
             bzStatusText: earliest.bzStatusText || '',
             countDownText: earliest.countDownText || '',
             dateType: dateType,
@@ -1858,11 +1857,10 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
             baseUnitName: baseUnitName
         };
     } catch (e) {
-        console.error('获取最早批次日期失败:', e);
+        console.error('获取最早批次失败:', e);
         return null;
     }
 }
-
 function formatDateTimeValue(dateStr, dateType, goodsItem) {
     if (!dateStr) return '';
     const date = new Date(dateStr);
@@ -1989,10 +1987,9 @@ async function getNeedUpdateGoodsList() {
         console.warn('加载 price_temp_state 失败:', e);
     }
 
-    // 用于去重：按 goods_id + spec_id 去重，只保留最早批次的记录
+    // ✅ 去重集合（只声明一次）
     const processedKeys = new Set();
 
-    // ========== 遍历所有商品 ==========
     for (const item of allGoods) {
         // 1. 获取该商品的所有规格（从 goods_unit_bind 获取）
         let specList = [];
@@ -2017,20 +2014,44 @@ async function getNeedUpdateGoodsList() {
                     });
                 }
             } else {
-                // 无规格绑定：使用商品的 spec 字段
-                let specId = item.unit_spec_id || 0;
-                let specName = item.spec || '-';
-                let specDisplay = item.spec || '-';
-                let salePrice = item.sale_price;
-                specList.push({
-                    unitSpecId: specId,
-                    specName: specName,
-                    specDisplay: specDisplay,
-                    salePrice: salePrice,
-                    onlineCost: item.online_cost,
-                    convertRate: 1,
-                    baseUnitName: ''
-                });
+                // 无规格绑定：从 allStockBatchList 获取有库存的规格
+                const stockSpecs = allStockBatchList.filter(record => 
+                    record.supplier === item.supplier && 
+                    record.goodsName === item.name &&
+                    record.batchRemain > 0
+                );
+                
+                if (stockSpecs.length > 0) {
+                    const seenSpecIds = new Set();
+                    for (const record of stockSpecs) {
+                        const specId = record.unitSpecId || 0;
+                        if (!seenSpecIds.has(specId)) {
+                            seenSpecIds.add(specId);
+                            const specObj = unitSpecList.find(s => s.id == specId);
+                            specList.push({
+                                unitSpecId: specId,
+                                specName: specObj ? specObj.show_name : (record.spec || '-'),
+                                specDisplay: specObj && record.spec ? record.spec : (specObj ? specObj.show_name : '-'),
+                                salePrice: item.sale_price,
+                                onlineCost: item.online_cost,
+                                convertRate: specObj ? specObj.convert_rate : 1,
+                                baseUnitName: ''
+                            });
+                        }
+                    }
+                }
+                
+                if (specList.length === 0) {
+                    specList.push({
+                        unitSpecId: item.unit_spec_id || 0,
+                        specName: item.spec || '-',
+                        specDisplay: item.spec || '-',
+                        salePrice: item.sale_price,
+                        onlineCost: item.online_cost,
+                        convertRate: 1,
+                        baseUnitName: ''
+                    });
+                }
             }
         } catch (e) {
             console.warn('获取商品规格失败:', item.id, e);
@@ -2049,29 +2070,25 @@ async function getNeedUpdateGoodsList() {
         for (const specInfo of specList) {
             const unitSpecId = specInfo.unitSpecId;
             const specDisplay = specInfo.specDisplay;
-            const specSalePrice = specInfo.salePrice;  // 从 goods_unit_bind 获取的价格
+            const specSalePrice = specInfo.salePrice;
             
-            // 获取该规格的库存批次
+            // 获取该规格的库存批次（取最早批次）
             const earliest = getEarliestBatchDate(item.supplier, item.name, unitSpecId);
             if (!earliest || earliest.batchRemain <= 0) {
                 continue;
             }
             
-            // 用于去重：按 goods_id + spec_id 去重
-const processedKeys = new Set();
-
-// 在遍历每个规格时：
-const key = item.id + '_' + unitSpecId;
-if (processedKeys.has(key)) {
-    continue;
-}
-processedKeys.add(key);
+            // ✅ 去重检查
+            const key = item.id + '_' + unitSpecId;
+            if (processedKeys.has(key)) {
+                continue;
+            }
+            processedKeys.add(key);
             
             // 检查日期是否需要更新
             const dateCheck = checkNeedDateUpdate(item, unitSpecId);
             const dateChanged = dateCheck.needUpdate;
 
-            // 原销售价：优先使用规格绑定的价格，否则使用商品默认价格
             const normalPrice = (specSalePrice !== null && specSalePrice !== undefined) ? specSalePrice : (item.sale_price || 0);
             
             const lastPrice = item.last_sale_price !== null && item.last_sale_price !== undefined 
@@ -2079,7 +2096,6 @@ processedKeys.add(key);
                 : normalPrice;
             const priceChanged = (normalPrice !== lastPrice);
 
-            // 如果日期和价格都没有变化，跳过
             if (!dateChanged && !priceChanged) {
                 continue;
             }
@@ -2104,7 +2120,6 @@ processedKeys.add(key);
             let priceStatus = 'pending';
             let statusPrice = null;
 
-            // 使用 goods_id + spec_id 作为 key
             const priceKey = item.id + '_' + unitSpecId;
             const priceData = priceMap[priceKey];
             const isNormalOrExpire = (bzStatus === '正常' || bzStatus === '过期');
@@ -2170,6 +2185,8 @@ processedKeys.add(key);
 
             const isUpdateDisabled = isDiscountOrExpire && (statusPrice === null || statusPrice === undefined);
 
+            const recordDateStr = earliest.recordDate ? new Date(earliest.recordDate).toISOString().split('T')[0] : '-';
+
             result.push({
                 id: item.id,
                 unitSpecId: unitSpecId,
@@ -2197,7 +2214,7 @@ processedKeys.add(key);
                 dateValue: dateCheck.dateValue || null,
                 displayValue: dateCheck.displayValue || '',
                 batchRemain: earliest.batchRemain || 0,
-                recordDate: earliest.recordDate || null,
+                recordDate: recordDateStr,
                 newSalePrice: newSalePrice,
                 priceStatus: priceStatus,
                 bzStatus: bzStatus,
