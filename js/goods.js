@@ -1987,103 +1987,78 @@ async function getNeedUpdateGoodsList() {
         console.warn('加载 price_temp_state 失败:', e);
     }
 
-    // ✅ 去重集合（只声明一次）
     const processedKeys = new Set();
 
     for (const item of allGoods) {
-        // 1. 获取该商品的所有规格（从 goods_unit_bind 获取）
-        let specList = [];
-        try {
-            const bindRes = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${item.id}&select=*`, {
-                headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
-            });
-            const bindList = await bindRes.json() || [];
-            
-            if (bindList.length > 0) {
-                for (const bind of bindList) {
-                    const specObj = unitSpecList.find(s => s.id == bind.spec_id);
-                    const baseItem = baseUnitList.find(b => b.id == bind.base_unit_id);
-                    specList.push({
-                        unitSpecId: bind.spec_id,
-                        specName: specObj ? specObj.show_name : '-',
-                        specDisplay: specObj && baseItem ? specObj.show_name + '（' + specObj.convert_rate + baseItem.unit_name + '）' : (specObj ? specObj.show_name : '-'),
-                        salePrice: bind.sale_price,
-                        onlineCost: bind.online_cost,
-                        convertRate: specObj ? specObj.convert_rate : 1,
-                        baseUnitName: baseItem ? baseItem.unit_name : ''
-                    });
-                }
-            } else {
-                // 无规格绑定：从 allStockBatchList 获取有库存的规格
-                const stockSpecs = allStockBatchList.filter(record => 
-                    record.supplier === item.supplier && 
-                    record.goodsName === item.name &&
-                    record.batchRemain > 0
-                );
-                
-                if (stockSpecs.length > 0) {
-                    const seenSpecIds = new Set();
-                    for (const record of stockSpecs) {
-                        const specId = record.unitSpecId || 0;
-                        if (!seenSpecIds.has(specId)) {
-                            seenSpecIds.add(specId);
-                            const specObj = unitSpecList.find(s => s.id == specId);
-                            specList.push({
-                                unitSpecId: specId,
-                                specName: specObj ? specObj.show_name : (record.spec || '-'),
-                                specDisplay: specObj && record.spec ? record.spec : (specObj ? specObj.show_name : '-'),
-                                salePrice: item.sale_price,
-                                onlineCost: item.online_cost,
-                                convertRate: specObj ? specObj.convert_rate : 1,
-                                baseUnitName: ''
-                            });
-                        }
-                    }
-                }
-                
-                if (specList.length === 0) {
-                    specList.push({
-                        unitSpecId: item.unit_spec_id || 0,
-                        specName: item.spec || '-',
-                        specDisplay: item.spec || '-',
-                        salePrice: item.sale_price,
-                        onlineCost: item.online_cost,
-                        convertRate: 1,
-                        baseUnitName: ''
-                    });
-                }
-            }
-        } catch (e) {
-            console.warn('获取商品规格失败:', item.id, e);
-            specList.push({
-                unitSpecId: item.unit_spec_id || 0,
-                specName: item.spec || '-',
-                specDisplay: item.spec || '-',
-                salePrice: item.sale_price,
-                onlineCost: item.online_cost,
-                convertRate: 1,
-                baseUnitName: ''
-            });
+        // ========== 🔥 修改：从 allStockBatchList 获取有库存的规格 ==========
+        // 而不是从 goods_unit_bind 获取
+        const stockSpecs = allStockBatchList.filter(record => 
+            record.supplier === item.supplier && 
+            record.goodsName === item.name &&
+            record.batchRemain > 0
+        );
+        
+        if (stockSpecs.length === 0) {
+            continue; // 没有库存，跳过
         }
         
-        // 2. 遍历每个规格
+        // 按 unitSpecId 去重
+        const seenSpecIds = new Set();
+        const specList = [];
+        for (const record of stockSpecs) {
+            const specId = record.unitSpecId || record.specId || 0;
+            if (!seenSpecIds.has(specId)) {
+                seenSpecIds.add(specId);
+                // 使用 record.spec 作为显示名称（已经包含了换算比例）
+                const specDisplay = record.spec || '-';
+                // 获取规格名称（不含换算比例）
+                let specName = specDisplay;
+                // 如果规格显示包含括号，提取纯名称
+                if (specDisplay.includes('（')) {
+                    specName = specDisplay.split('（')[0].trim();
+                }
+                
+                // 从 goods_unit_bind 获取该规格的销售价
+                let salePrice = item.sale_price;
+                try {
+                    const bindRes = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${item.id}&spec_id=eq.${specId}`, {
+                        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+                    });
+                    const bindData = await bindRes.json();
+                    if (bindData && bindData.length > 0 && bindData[0].sale_price !== null && bindData[0].sale_price !== undefined) {
+                        salePrice = bindData[0].sale_price;
+                    }
+                } catch (e) {
+                    console.warn('获取规格价格失败:', e);
+                }
+                
+                specList.push({
+                    unitSpecId: specId,
+                    specName: specName,
+                    specDisplay: specDisplay,
+                    salePrice: salePrice
+                });
+            }
+        }
+        
+        // 遍历每个有库存的规格
         for (const specInfo of specList) {
             const unitSpecId = specInfo.unitSpecId;
             const specDisplay = specInfo.specDisplay;
             const specSalePrice = specInfo.salePrice;
+            
+            // 去重检查
+            const key = item.id + '_' + unitSpecId;
+            if (processedKeys.has(key)) {
+                continue;
+            }
+            processedKeys.add(key);
             
             // 获取该规格的库存批次（取最早批次）
             const earliest = getEarliestBatchDate(item.supplier, item.name, unitSpecId);
             if (!earliest || earliest.batchRemain <= 0) {
                 continue;
             }
-            
-            // ✅ 去重检查
-            const key = item.id + '_' + unitSpecId;
-            if (processedKeys.has(key)) {
-                continue;
-            }
-            processedKeys.add(key);
             
             // 检查日期是否需要更新
             const dateCheck = checkNeedDateUpdate(item, unitSpecId);
