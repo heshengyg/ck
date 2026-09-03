@@ -1727,26 +1727,71 @@ let dateChangeFilterData = {
     settleType: [],
     bzStatus: []
 };
+function buildStockBatchListFromStockIn() {
+    if (!allStockIn || allStockIn.length === 0) return;
+    
+    console.log('🔄 从 allStockIn 构建 allStockBatchList...');
+    const groupMap = {};
+    
+    allStockIn.forEach(record => {
+        // 按 supplier + goodsName + unit_spec_id + produce_date + expire_date 分组
+        const key = record.supplier + '|' + record.goodsName + '|' + (record.unit_spec_id || 0) + '|' + (record.produce_date || '') + '|' + (record.expire_date || '');
+        if (!groupMap[key]) {
+            const specObj = unitSpecList.find(s => s.id == (record.unit_spec_id || 0));
+            groupMap[key] = {
+                supplier: record.supplier,
+                goodsName: record.goodsName,
+                spec: specObj ? specObj.show_name : (record.spec || '-'),
+                unitSpecId: record.unit_spec_id || 0,
+                settleType: record.settleType || '',
+                inRecords: [],
+                batchRemain: 0,
+                produce_date: record.produce_date || '-',
+                expire_date: record.expire_date || '-',
+                bzStatusText: '',
+                countDownText: '',
+                recordDate: record.record_date || null,
+                dateType: '',
+                dateValue: null
+            };
+        }
+        groupMap[key].batchRemain += (record.remain_num || 0);
+        groupMap[key].inRecords.push(record);
+    });
+    
+    allStockBatchList = Object.values(groupMap);
+    window.allStockBatchList = allStockBatchList;
+    console.log('✅ 构建完成，allStockBatchList 长度:', allStockBatchList.length);
+}
 
+// ========== 修复 getEarliestBatchDate ==========
 function getEarliestBatchDate(supplier, goodsName, spec) {
     try {
         if (!allStockBatchList || allStockBatchList.length === 0) {
-            return null;
+            // 如果 allStockBatchList 为空，尝试从 allStockIn 构建
+            if (allStockIn && allStockIn.length > 0) {
+                buildStockBatchListFromStockIn();
+            }
+            if (!allStockBatchList || allStockBatchList.length === 0) {
+                return null;
+            }
         }
         
-        // 🔥 核心改变1：直接调用 getStockBatchList 获取所有批次
-        const newBatchList = getStockBatchList(supplier, goodsName);
-        if (!newBatchList || newBatchList.length === 0) return null;
-
-        // 🔥 核心改变2：筛选匹配的入库规格
-        const targetSpecId = spec; // 这里的 spec 传进来其实是 unit_spec_id
-        const batchList = newBatchList.filter(item => String(item.unitSpecId) === String(targetSpecId));
-
+        // 匹配批次
+        const targetSpecId = spec ? parseInt(spec) : 0;
+        let batchList = allStockBatchList.filter(function(item) {
+            if (item.supplier !== supplier || item.goodsName !== goodsName) {
+                return false;
+            }
+            const itemSpecId = item.unitSpecId || 0;
+            return itemSpecId === targetSpecId;
+        });
+        
         if (!batchList || batchList.length === 0) {
             return null;
         }
         
-        // ⚠️ 以下所有逻辑完全保留了你的原代码（排序、取时间、取状态等）
+        // 按日期排序（取最早的）
         batchList.sort(function(a, b) {
             const getDate = function(item) {
                 if (item.produce_date && item.produce_date !== '-') {
@@ -1768,55 +1813,79 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
         });
         
         const earliest = batchList[0];
-        let recordDate = null;
-        if (earliest && allStockIn) {
-            const matchedIn = allStockIn.find(function(item) {
-                const matchSupplier = item.supplier === supplier;
-                const matchGoods = item.goodsName === goodsName;
-                const matchSpec = item.unit_spec_id === targetSpecId;
-                return matchSupplier && matchGoods && matchSpec;
-            });
-            if (matchedIn) {
-                recordDate = matchedIn.record_date;
+        
+        // ========== 🔥 关键修复：使用 common.js 的 calcBzStatus 计算状态和倒计时 ==========
+        let bzStatusText = earliest.bzStatusText || '';
+        let countDownText = earliest.countDownText || '';
+        
+        // 如果 batchList 中的条目没有 bzStatusText，则调用 common.js 的 calcBzStatus 计算
+        if (!bzStatusText && typeof calcBzStatus === 'function') {
+            const goodsItem = allGoods.find(g => g.supplier === supplier && g.name === goodsName);
+            const shelfLifeNum = goodsItem ? goodsItem.shelf_life_num : null;
+            const shelfLifeUnit = goodsItem ? goodsItem.shelf_life_unit : null;
+            
+            // 获取临期天数配置
+            let warnDay = 7; // 默认7天
+            if (window.settingsData?.discountConfig?.warnDay) {
+                warnDay = window.settingsData.discountConfig.warnDay;
+            }
+            
+            // 转换单位格式：天/个月/年 → day/month/year
+            let unitMap = { '天': 'day', '个月': 'month', '年': 'year' };
+            let bzUnit = unitMap[shelfLifeUnit] || 'day';
+            
+            const result = calcBzStatus(
+                earliest.produce_date || null,
+                earliest.expire_date || null,
+                shelfLifeNum,
+                bzUnit,
+                warnDay
+            );
+            
+            bzStatusText = result.statusText || '正常';
+            countDownText = result.countDownText || '';
+        }
+        
+        // 如果仍然没有 bzStatusText，使用默认值
+        if (!bzStatusText) {
+            bzStatusText = '正常';
+            countDownText = '';
+        }
+        
+        // 确定日期类型和值
+        let dateType = earliest.dateType || '';
+        let dateValue = earliest.dateValue || null;
+        if (!dateType) {
+            if (earliest.produce_date && earliest.produce_date !== '-') {
+                dateType = '生产日期';
+                dateValue = earliest.produce_date;
+            } else if (earliest.expire_date && earliest.expire_date !== '-') {
+                dateType = '到期日期';
+                dateValue = earliest.expire_date;
             }
         }
         
-        let produceDate = null;
-        let expireDate = null;
-        let dateType = '';
-        let dateValue = null;
-        
-        if (earliest.produce_date && earliest.produce_date !== '-') {
-            produceDate = earliest.produce_date;
-            dateType = '生产日期';
-            dateValue = earliest.produce_date;
-        } else if (earliest.expire_date && earliest.expire_date !== '-') {
-            expireDate = earliest.expire_date;
-            dateType = '到期日期';
-            dateValue = earliest.expire_date;
-        }
-        
-        // 🔥 核心改变3：从批次数据中返回新规格名称，供列表展示
+        // 获取规格名称
         const specObj = unitSpecList.find(s => s.id == targetSpecId);
         const specName = specObj ? specObj.show_name : (earliest.spec || '-');
-
+        
         return {
-            produce_date: produceDate,
-            expire_date: expireDate,
+            produce_date: earliest.produce_date || null,
+            expire_date: earliest.expire_date || null,
             batchRemain: earliest.batchRemain || 0,
-            recordDate: recordDate,
-            bzStatusText: earliest.bzStatusText || '',
-            countDownText: earliest.countDownText || '',
+            recordDate: earliest.recordDate || null,
+            bzStatusText: bzStatusText,
+            countDownText: countDownText,
             dateType: dateType,
             dateValue: dateValue,
-            specName: specName  // 新增了这个字段
+            specName: specName,
+            unitSpecId: targetSpecId
         };
     } catch (e) {
         console.error('获取最早批次失败:', e);
         return null;
     }
 }
-
 function formatDateTimeValue(dateStr, dateType, goodsItem) {
     if (!dateStr) return '';
     const date = new Date(dateStr);
@@ -2741,6 +2810,33 @@ function updateDateChangeSortIcon() {
         }
     }
 }
+// ============================================================
+// ========== 获取改日改价规格显示（含换算比例） ==========
+// ============================================================
+function getDateChangeSpecDisplay(item) {
+    if (!item) return '-';
+    
+    // 优先从 earliestBatch 获取规格名称
+    if (item.earliestBatch && item.earliestBatch.specName) {
+        const specName = item.earliestBatch.specName;
+        // 尝试获取换算比例
+        const specObj = unitSpecList.find(s => s.show_name === specName);
+        if (specObj) {
+            const baseItem = baseUnitList.find(u => u.id == specObj.base_unit_id);
+            if (baseItem) {
+                return specName + ' (' + specObj.convert_rate + baseItem.unit_name + ')';
+            }
+        }
+        return specName;
+    }
+    
+    // 使用 item.spec
+    if (item.spec && item.spec !== '-') {
+        return item.spec;
+    }
+    
+    return '-';
+}
 
 function renderDateChangeList() {
     // 排序规则：如果用户点击了表头排序，则优先使用表头排序；无表头排序时默认「待改价」置顶
@@ -2950,7 +3046,7 @@ actionButtons += '</div>';
                 <td>${recordDateStr}</td>
                 <td>${item.supplier || ''}</td>
                 <td>${item.name || ''}</td>
-                <td>${item.spec || '-'}</td>
+                <td>${getDateChangeSpecDisplay(item)}</td>
                 <td ${settleColor}>${item.settleType || '-'}</td>
                 <td>${item.batchRemain || 0}</td>
                 <td style="background-color:${statusBgColor}; color:${statusColor}; text-align:center;">${statusText}</td>
