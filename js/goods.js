@@ -3139,7 +3139,7 @@ document.addEventListener('click', function(e) {
 // ========== 改价弹窗相关函数（新改价逻辑） ==========
 // ============================================================
 
-function openPriceModal(id, specId) {
+async function openPriceModal(id, specId) {
     // 权限拦截
     if (!canOperatePriceEdit()) {
         showMsg('当前角色无改价权限（仅管理员、商品部可操作）');
