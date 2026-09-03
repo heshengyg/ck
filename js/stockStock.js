@@ -346,33 +346,35 @@ async function loadStockStock() {
                 const totalAllStock = cacheData.totalStock || getTotalStockNum(batch.supplier, batch.goodsName);
                 const warnStockThreshold = goodsBase.warn_num || 0;
                 
-                // ========== 🔥 获取最小计量单位名称 ==========
-                let baseUnitName = '';
-                let convertRate = 1;
-                let specDisplay = '-';
-                let specId = batch.unitSpecId || 0;
-                
-                // 获取规格信息
-                if (specId > 0) {
-                    const specObj = unitSpecList.find(s => s.id == specId);
-                    if (specObj) {
-                        const baseItem = baseUnitList.find(b => b.id == specObj.base_unit_id);
-                        if (baseItem) {
-                            baseUnitName = baseItem.unit_name;
-                            convertRate = specObj.convert_rate || 1;
-                            specDisplay = specObj.show_name + ' (' + convertRate + baseUnitName + ')';
-                        } else {
-                            specDisplay = specObj.show_name || '-';
-                        }
-                    }
-                } else {
-                    // 无规格ID，使用 batch.spec
-                    specDisplay = batch.spec || '-';
-                }
-                
-                // ========== 🔥 计算批次库存金额（精确到2位小数） ==========
-                // 批次库存金额 = 批次剩余库存（最小计量单位） × 入库单价
-                const batchAmount = Number((batch.batchRemain * (firstRecord.in_price || 0)).toFixed(2));
+               // ========== 🔥 获取最小计量单位名称和换算比例 ==========
+let baseUnitName = '';
+let convertRate = 1;
+let specDisplay = '-';
+let specId = batch.unitSpecId || 0;
+
+// 获取规格信息
+if (specId > 0) {
+    const specObj = unitSpecList.find(s => s.id == specId);
+    if (specObj) {
+        const baseItem = baseUnitList.find(b => b.id == specObj.base_unit_id);
+        if (baseItem) {
+            baseUnitName = baseItem.unit_name;
+            convertRate = specObj.convert_rate || 1;
+            specDisplay = specObj.show_name + ' (' + convertRate + baseUnitName + ')';
+        } else {
+            specDisplay = specObj.show_name || '-';
+        }
+    }
+} else {
+    // 无规格ID，使用 batch.spec
+    specDisplay = batch.spec || '-';
+}
+
+// ========== 🔥 计算批次库存金额（精确计算：单价/换算比例 × 批次库存） ==========
+// 每单位（最小计量单位）金额 = 入库单价 / 换算比例
+// 批次库存金额 = 每单位金额 × 批次库存（最小计量单位）
+const unitPrice = (firstRecord.in_price || 0) / convertRate;
+const batchAmount = Number((unitPrice * batch.batchRemain).toFixed(2));
                 
                 // 计算保质期状态
                 let unitCode = "day";
