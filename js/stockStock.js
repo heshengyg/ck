@@ -319,6 +319,10 @@ async function loadStockStock() {
 
     // ✅ 确保 stockDataCache 已刷新
     refreshAllStockCache(allStockIn, allStockOut);
+    
+    // ✅ 加载单位数据
+    if (!baseUnitList || baseUnitList.length === 0) await loadAllBaseUnit();
+    if (!unitSpecList || unitSpecList.length === 0) await loadAllUnitSpec();
 
     try {
         allStockBatchList = [];
@@ -329,7 +333,6 @@ async function loadStockStock() {
             for (const batch of cacheData.batchList) {
                 if (batch.batchRemain <= 0) continue;
                 
-                // ✅ 从第一条入库记录获取单价
                 const firstRecord = batch.inRecords && batch.inRecords[0];
                 if (!firstRecord) continue;
                 
@@ -342,8 +345,34 @@ async function loadStockStock() {
                 
                 const totalAllStock = cacheData.totalStock || getTotalStockNum(batch.supplier, batch.goodsName);
                 const warnStockThreshold = goodsBase.warn_num || 0;
-                // ✅ 使用 firstRecord.in_price
-                const batchAmount = getBatchStockAmount(batch.batchRemain, firstRecord.in_price || 0);
+                
+                // ========== 🔥 获取最小计量单位名称 ==========
+                let baseUnitName = '';
+                let convertRate = 1;
+                let specDisplay = '-';
+                let specId = batch.unitSpecId || 0;
+                
+                // 获取规格信息
+                if (specId > 0) {
+                    const specObj = unitSpecList.find(s => s.id == specId);
+                    if (specObj) {
+                        const baseItem = baseUnitList.find(b => b.id == specObj.base_unit_id);
+                        if (baseItem) {
+                            baseUnitName = baseItem.unit_name;
+                            convertRate = specObj.convert_rate || 1;
+                            specDisplay = specObj.show_name + ' (' + convertRate + baseUnitName + ')';
+                        } else {
+                            specDisplay = specObj.show_name || '-';
+                        }
+                    }
+                } else {
+                    // 无规格ID，使用 batch.spec
+                    specDisplay = batch.spec || '-';
+                }
+                
+                // ========== 🔥 计算批次库存金额（精确到2位小数） ==========
+                // 批次库存金额 = 批次剩余库存（最小计量单位） × 入库单价
+                const batchAmount = Number((batch.batchRemain * (firstRecord.in_price || 0)).toFixed(2));
                 
                 // 计算保质期状态
                 let unitCode = "day";
@@ -381,14 +410,21 @@ async function loadStockStock() {
                     bzText = `${goodsBase.shelf_life_num}${goodsBase.shelf_life_unit}`;
                 }
                 
+                // ========== 🔥 批次库存显示带单位 ==========
+                let batchRemainDisplay = batch.batchRemain + (baseUnitName ? baseUnitName : '');
+                let totalStockDisplay = totalAllStock + (baseUnitName ? baseUnitName : '');
+                
                 allStockBatchList.push({
                     supplier: batch.supplier,
                     goodsName: batch.goodsName,
-                    spec: batch.spec || '-',
+                    spec: specDisplay,
+                    specId: specId,
                     settleType: batch.settleType || '-',
-                    outPrice: firstRecord.in_price || 0,  // ✅ 从第一条入库记录取单价
+                    outPrice: firstRecord.in_price || 0,
                     batchRemain: batch.batchRemain,
+                    batchRemainDisplay: batchRemainDisplay,
                     totalAllStock: totalAllStock,
+                    totalStockDisplay: totalStockDisplay,
                     warnStockThreshold: warnStockThreshold,
                     stockWarnText: stockWarnText,
                     batchAmount: batchAmount,
@@ -397,7 +433,8 @@ async function loadStockStock() {
                     bzText: bzText,
                     bzStatusText: bzResult.statusText,
                     countDownText: bzResult.countDownText,
-                    recordDate: recordDate
+                    recordDate: recordDate,
+                    baseUnitName: baseUnitName
                 });
             }
         }
@@ -413,7 +450,6 @@ async function loadStockStock() {
         console.error("库存加载异常：", e);
     }
 }
-
 /**
  * 搜索筛选（原有点击搜索按钮依然保留可用，新增输入实时触发）
  */
@@ -555,10 +591,14 @@ function renderStockTable() {
         stockSummary.totalBatchStock += item.batchRemain;
         stockSummary.totalAllStock += item.totalAllStock;
     });
+    
+    // ✅ 汇总金额保留2位小数
+    stockSummary.totalAmount = Number(stockSummary.totalAmount.toFixed(2));
 
-    // 渲染数据行：序列，供应商，商品名，规格，结算方式，单价，批次库存，总库存，库存预警阈值，库存状态，库存金额，生产日期，到期日期，保质期，保质期状态，状态倒计
+    // 渲染数据行
     pageData.forEach((item, idx) => {
         const seq = start + idx + 1;
+        
         // 库存状态背景色
         let warnBg = '';
         if (item.stockWarnText === '报警') {
@@ -566,30 +606,22 @@ function renderStockTable() {
         } else if (item.stockWarnText === '正常' || item.stockWarnText === '临界') {
             warnBg = 'style="background:#ddffdd;"';
         }
-        // 保质期状态背景色 - 基于配置索引（第1条、第2条...）
-let bzBg = '';
-if (item.bzStatusText === '过期') {
-    bzBg = 'style="background:#ff4444;color:#fff;"';
-} else if (item.bzStatusText === '临期') {
-    bzBg = 'style="background:#ffdddd;"';
-} else if (item.bzStatusText === '正常') {
-    bzBg = 'style="background:#d4edda;"';
-} else if (item.bzStatusText && item.bzStatusText !== '') {
-    // 打折状态：根据配置中的索引分配颜色
-    const config = window.settingsData?.discountConfig?.items || [];
-    const index = config.findIndex(c => c.label === item.bzStatusText);
-    
-    // 4种颜色：浅红、浅蓝、浅黄、橘色（按索引顺序）
-    const colors = [
-        '#ffcdd2', // 浅红（第1条）
-        '#bbdefb', // 浅蓝（第2条）
-        '#fff9c4', // 浅黄（第3条）
-        '#ffe0b2'  // 橘色（第4条）
-    ];
-    const colorIndex = (index >= 0 && index < colors.length) ? index : 0;
-    bzBg = `style="background:${colors[colorIndex]};"`;
-}
-// 如果 bzStatusText 为空字符串，bzBg 保持 ''，不添加任何背景色
+        
+        // 保质期状态背景色
+        let bzBg = '';
+        if (item.bzStatusText === '过期') {
+            bzBg = 'style="background:#ff4444;color:#fff;"';
+        } else if (item.bzStatusText === '临期') {
+            bzBg = 'style="background:#ffdddd;"';
+        } else if (item.bzStatusText === '正常') {
+            bzBg = 'style="background:#d4edda;"';
+        } else if (item.bzStatusText && item.bzStatusText !== '') {
+            const config = window.settingsData?.discountConfig?.items || [];
+            const index = config.findIndex(c => c.label === item.bzStatusText);
+            const colors = ['#ffcdd2', '#bbdefb', '#fff9c4', '#ffe0b2'];
+            const colorIndex = (index >= 0 && index < colors.length) ? index : 0;
+            bzBg = `style="background:${colors[colorIndex]};"`;
+        }
 
         htmlStr += `
         <tr>
@@ -599,8 +631,8 @@ if (item.bzStatusText === '过期') {
             <td>${item.spec}</td>
             <td>${item.settleType}</td>
             <td>${formatMoney(item.outPrice)}</td>
-            <td>${item.batchRemain}</td>
-            <td>${item.totalAllStock}</td>
+            <td>${item.batchRemainDisplay || item.batchRemain}</td>
+            <td>${item.totalStockDisplay || item.totalAllStock}</td>
             <td>${item.warnStockThreshold}</td>
             <td ${warnBg}>${item.stockWarnText}</td>
             <td>${formatMoney(item.batchAmount)}</td>
@@ -613,12 +645,7 @@ if (item.bzStatusText === '过期') {
         `;
     });
 
-    // 汇总规则：
-    // 1-6列合并：筛选数据汇总
-    // 第7列：批次库存汇总值
-    // 8-10列合并空白占位
-    // 第11列：库存金额汇总值
-    // 12-16列合并空白占位
+    // 汇总行
     htmlStr += `
     <tr style="background:#f5f7fa;font-weight:bold;">
         <td colspan="6">筛选数据汇总</td>
@@ -683,13 +710,14 @@ function exportStockStockExcel() {
         showMsg("暂无库存数据可导出");
         return;
     }
-    // 先计算筛选后全部数据的全局汇总值
+    
     let totalBatchStock = 0;
     let totalAmount = 0;
     filteredStockBatch.forEach(item => {
         totalBatchStock += item.batchRemain;
         totalAmount += item.batchAmount;
     });
+    totalAmount = Number(totalAmount.toFixed(2));
 
     const header = [
         "序列", "供应商", "商品名", "规格", "结算方式", "单价", "批次库存", "总库存",
@@ -702,11 +730,11 @@ function exportStockStockExcel() {
         item.spec,
         item.settleType,
         item.outPrice,
-        item.batchRemain,
-        item.totalAllStock,
+        item.batchRemainDisplay || item.batchRemain,
+        item.totalStockDisplay || item.totalAllStock,
         item.warnStockThreshold,
         item.stockWarnText,
-        item.batchAmount,
+        Number(item.batchAmount.toFixed(2)),
         item.produce_date,
         item.expire_date,
         item.bzText,
@@ -714,10 +742,8 @@ function exportStockStockExcel() {
         item.countDownText
     ]);
 
-    // 新增汇总行：和页面规则一致
-    // 1-6列合并文字，第7列批次库存合计，8-10空白，第11列库存金额合计，剩余列空白
     const summaryRow = [
-        "筛选数据汇总", "", "", "", "", "", totalBatchStock, "", "", "", totalAmount.toFixed(2), "", "", "", "", ""
+        "筛选数据汇总", "", "", "", "", "", totalBatchStock, "", "", "", Number(totalAmount.toFixed(2)), "", "", "", "", ""
     ];
     expData.push(summaryRow);
 
@@ -726,7 +752,6 @@ function exportStockStockExcel() {
     XLSX.utils.book_append_sheet(wb, ws, "库存明细");
     XLSX.writeFile(wb, "库存明细.xlsx");
 }
-
 // 全局点击关闭库存下拉框
 document.addEventListener('click', function(e) {
     const listIds = [
