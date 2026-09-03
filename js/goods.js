@@ -1743,16 +1743,15 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
         
         // 🔥 严格按 unitSpecId 匹配，只匹配有库存的批次
         let batchList = allStockBatchList.filter(function(item) {
-            if (item.supplier !== supplier || item.goodsName !== goodsName) {
-                return false;
-            }
-            if (item.batchRemain <= 0) {
-                return false;
-            }
-            const itemSpecId = item.unitSpecId || 0;
-            // 🔥 严格匹配：只匹配相同 unitSpecId
-            return itemSpecId === targetSpecId;
-        });
+    if (item.supplier !== supplier || item.goodsName !== goodsName) {
+        return false;
+    }
+    if ((item.batchRemain || 0) <= 0) {
+        return false;
+    }
+    const itemSpecId = item.unitSpecId || item.specId || 0;
+    return itemSpecId === targetSpecId;
+});
         
         if (!batchList || batchList.length === 0) {
             return null;
@@ -1993,10 +1992,10 @@ async function getNeedUpdateGoodsList() {
         // ========== 🔥 修改：从 allStockBatchList 获取有库存的规格 ==========
         // 而不是从 goods_unit_bind 获取
         const stockSpecs = allStockBatchList.filter(record => 
-            record.supplier === item.supplier && 
-            record.goodsName === item.name &&
-            record.batchRemain > 0
-        );
+    record.supplier === item.supplier && 
+    record.goodsName === item.name &&
+    (record.batchRemain || 0) > 0
+);
         
         if (stockSpecs.length === 0) {
             continue; // 没有库存，跳过
@@ -2006,7 +2005,7 @@ async function getNeedUpdateGoodsList() {
         const seenSpecIds = new Set();
         const specList = [];
         for (const record of stockSpecs) {
-            const specId = record.unitSpecId || record.specId || 0;
+            const specId = record.specId || record.unitSpecId || 0;
             if (!seenSpecIds.has(specId)) {
                 seenSpecIds.add(specId);
                 // 使用 record.spec 作为显示名称（已经包含了换算比例）
