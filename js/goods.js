@@ -1739,7 +1739,6 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
             }
         }
         
-        // ✅ 处理 spec 为 undefined 或 null 的情况
         const targetSpecId = (spec !== undefined && spec !== null) ? parseInt(spec) : 0;
         
         let batchList = allStockBatchList.filter(function(item) {
@@ -1747,7 +1746,7 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
                 return false;
             }
             const itemSpecId = item.unitSpecId || 0;
-            // 如果 targetSpecId 为 0，匹配所有规格（兼容旧数据）
+            // 如果 targetSpecId 为 0，匹配所有规格
             if (targetSpecId === 0) {
                 return true;
             }
@@ -1755,20 +1754,18 @@ function getEarliestBatchDate(supplier, goodsName, spec) {
         });
         
         if (!batchList || batchList.length === 0) {
-            // 如果按 unitSpecId 匹配不到，尝试按 spec 字符串匹配
+            // 降级：匹配所有规格
             batchList = allStockBatchList.filter(function(item) {
                 if (item.supplier !== supplier || item.goodsName !== goodsName) {
                     return false;
                 }
-                const targetSpec = spec !== undefined && spec !== null ? String(spec) : '';
-                const itemSpec = item.spec || '';
-                return itemSpec === targetSpec;
+                return true;
             });
         }
         
         if (!batchList || batchList.length === 0) {
             return null;
-        }        
+        }       
         batchList.sort(function(a, b) {
             const getDate = function(item) {
                 if (item.produce_date && item.produce_date !== '-') {
@@ -1872,18 +1869,15 @@ function formatDateTimeValue(dateStr, dateType, goodsItem) {
     }
 }
 
-function checkNeedDateUpdate(goodsItem) {
-    const earliest = getEarliestBatchDate(goodsItem.supplier, goodsItem.name, goodsItem.spec || '-');
+function checkNeedDateUpdate(goodsItem, specId) {
+    // 🔥 传入 specId 给 getEarliestBatchDate
+    const earliest = getEarliestBatchDate(goodsItem.supplier, goodsItem.name, specId);
     if (!earliest || earliest.batchRemain <= 0) {
         return { needUpdate: false, earliest: null };
     }
     
     const savedProduce = goodsItem.saved_produce_date;
     const savedExpire = goodsItem.saved_expire_date;
-    
-    console.log('检查商品:', goodsItem.name);
-    console.log('  最早批次生产日期:', earliest.produce_date);
-    console.log('  已保存生产日期:', savedProduce);
     
     let needUpdate = false;
     let dateType = '';
@@ -1919,13 +1913,10 @@ function checkNeedDateUpdate(goodsItem) {
             currentCompareStr = currentDateStr;
         }
         
-        console.log('  比对:', savedDateStr, 'vs', currentCompareStr);
-        
         if (savedDateStr !== currentCompareStr) {
             needUpdate = true;
             dateType = '生产日期';
             dateValue = earliest.produce_date;
-            console.log('  ✅ 需要更新');
         }
     }
     
@@ -1937,7 +1928,6 @@ function checkNeedDateUpdate(goodsItem) {
             needUpdate = true;
             dateType = '到期日期';
             dateValue = earliest.expire_date;
-            console.log('  ✅ 需要更新（到期日期）');
         }
     }
     
@@ -1949,7 +1939,6 @@ function checkNeedDateUpdate(goodsItem) {
         displayValue: dateValue ? formatDateTimeValue(dateValue, dateType, goodsItem) : ''
     };
 }
-
 async function getNeedUpdateGoodsList() {
     const result = [];
     if (!allGoods || allGoods.length === 0) {
