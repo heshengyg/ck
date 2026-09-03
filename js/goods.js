@@ -2011,36 +2011,50 @@ async function getNeedUpdateGoodsList() {
         console.warn('加载 price_temp_state 失败:', e);
     }
 
-    // ========== 🆕 核心改变：按【商品+入库规格】获取有库存的记录 ==========
-    const inventoryRecords = allStockIn.filter(record => {
-        return allGoods.some(g => g.supplier === record.supplier && g.name === record.goodsName);
-    });
-
-    const processedKeys = new Set();
-    const uniqueInventoryList = [];
-
-    inventoryRecords.forEach(record => {
-        const key = `${record.supplier}_${record.goodsName}_${record.unit_spec_id || 0}`;
-        if (!processedKeys.has(key)) {
-            processedKeys.add(key);
-            uniqueInventoryList.push(record);
+    // ========== 按【商品+规格】遍历 ==========
+    // 先获取所有商品及其规格绑定
+    let goodsWithSpecs = [];
+    for (const goodsItem of allGoods) {
+        // 获取该商品的所有规格绑定
+        const bindRes = await fetch(`${SUPABASE_URL}/rest/v1/goods_unit_bind?goods_id=eq.${goodsItem.id}&select=*`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+        });
+        const bindList = await bindRes.json() || [];
+        
+        if (bindList.length > 0) {
+            // 有规格绑定：每个规格生成一条记录
+            for (const bind of bindList) {
+                goodsWithSpecs.push({
+                    goods: goodsItem,
+                    unitSpecId: bind.spec_id,
+                    specName: unitSpecList.find(s => s.id == bind.spec_id)?.show_name || '-'
+                });
+            }
+        } else {
+            // 无规格绑定：使用 goods 表的 spec 字段（或 unit_spec_id）
+            let specId = goodsItem.unit_spec_id || 0;
+            let specName = '-';
+            if (specId > 0) {
+                const specObj = unitSpecList.find(s => s.id == specId);
+                specName = specObj ? specObj.show_name : '-';
+            } else {
+                specName = goodsItem.spec || '-';
+            }
+            goodsWithSpecs.push({
+                goods: goodsItem,
+                unitSpecId: specId,
+                specName: specName
+            });
         }
-    });
+    }
     
-    // ========== 开始遍历【商品+入库规格】 ==========
-    for (const inRec of uniqueInventoryList) {
-        // 找到对应的商品信息
-        const item = allGoods.find(g => g.supplier === inRec.supplier && g.name === inRec.goodsName);
-        if (!item) continue;
-
-        const unitSpecId = inRec.unit_spec_id || 0;
-        const specObj = unitSpecList.find(s => s.id == unitSpecId);
-        const newSpecName = specObj ? specObj.show_name : '-';
-
+    // ========== 遍历商品+规格组合 ==========
+    for (const { goods: item, unitSpecId, specName } of goodsWithSpecs) {
+        // 获取该规格的库存批次
         const earliest = getEarliestBatchDate(item.supplier, item.name, unitSpecId);
         if (!earliest || earliest.batchRemain <= 0) continue;
         
-        // ========== 检查日期是否需要更新 ==========
+        // 检查日期是否需要更新
         const dateCheck = checkNeedDateUpdate(item, unitSpecId);
         const dateChanged = dateCheck.needUpdate;
 
@@ -2141,10 +2155,10 @@ async function getNeedUpdateGoodsList() {
         result.push({
             id: item.id,
             unitSpecId: unitSpecId,
-            specName: newSpecName,
+            specName: specName,
             supplier: item.supplier || '',
             name: item.name || '',
-            spec: newSpecName,
+            spec: specName,
             channel: item.channel || '',
             settleType: item.channel || '',
             sale_price: item.sale_price || 0,
@@ -2181,7 +2195,6 @@ async function getNeedUpdateGoodsList() {
             isDiscountOrExpire: isDiscountOrExpire,
             isUpdateDisabled: isUpdateDisabled
         });
-
     }
     
     console.log('需要更新的商品总数:', result.length);
@@ -2595,8 +2608,7 @@ async function updateSingleGoodsDateWithPrice(id, unitSpecId) {
     if (!item) {
         showMsg('找不到该商品记录');
         return;
-    }
-    
+    }    
     const statusText = item.earliestBatch?.bzStatusText || '';
     const isDiscountOrExpire = (statusText !== '正常' && statusText !== '过期');
     
@@ -3046,10 +3058,9 @@ if (updateBtnRealDisabled) {
     `;
 } else {
     actionButtons += `
-        <button class="btn btn-primary" onclick="updateSingleGoodsDateWithPrice(${item.id})" style="padding:4px 10px;font-size:12px;background:#007bff;color:#fff;border:none;border-radius:3px;cursor:pointer;white-space:nowrap;height:28px;line-height:20px;">更新</button>
+        <button class="btn btn-primary" onclick="updateSingleGoodsDateWithPrice(${item.id}, ${item.unitSpecId || 0})" style="padding:4px 10px;font-size:12px;background:#007bff;color:#fff;border:none;border-radius:3px;cursor:pointer;white-space:nowrap;height:28px;line-height:20px;">更新</button>
     `;
 }
-
 actionButtons += '</div>';        
         const html = `
             <tr>
